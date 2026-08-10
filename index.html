@@ -1021,14 +1021,14 @@ var olAIs = 0, olHumans = 2, olSize = 5;
 var moveQueue = [], processing = false;
 
 function showOLPanel(id) {
-  ['ol-menu','ol-create','ol-join','ol-lobby','ol-help'].forEach(function(p) {
+  ['ol-menu','ol-create','ol-join','ol-lobby','ol-help','ol-colours'].forEach(function(p) {
     var el = document.getElementById(p); if (el) el.style.display = 'none';
   });
   var el = document.getElementById(id); if (el) el.style.display = '';
   if (id === 'ol-create') buildOLCreateBtns();
 }
 function hideOLPanels() {
-  ['ol-menu','ol-create','ol-join','ol-lobby','ol-help'].forEach(function(p) {
+  ['ol-menu','ol-create','ol-join','ol-lobby','ol-help','ol-colours'].forEach(function(p) {
     var el = document.getElementById(p); if (el) el.style.display = 'none';
   });
 }
@@ -1075,6 +1075,8 @@ function olCreateRoom() {
     channel = ably.channels.get('cr-' + roomCode);
     channel.presence.enter({ name: myName, host: true });
     channel.presence.subscribe(updateOLLobby);
+    channel.subscribe('setup', onOLSetup);
+    channel.subscribe('colourpick', onOLColourPick);
     channel.subscribe('start', onOLStart);
     channel.subscribe('move', onOLMove);
     channel.subscribe('newgame', onOLNewGame);
@@ -1093,6 +1095,8 @@ function olJoinRoom() {
     channel = ably.channels.get('cr-' + roomCode);
     channel.presence.enter({ name: myName, host: false });
     channel.presence.subscribe(updateOLLobby);
+    channel.subscribe('setup', onOLSetup);
+    channel.subscribe('colourpick', onOLColourPick);
     channel.subscribe('start', onOLStart);
     channel.subscribe('move', onOLMove);
     channel.subscribe('newgame', onOLNewGame);
@@ -1130,11 +1134,172 @@ function updateOLLobby() {
   });
 }
 
+var olSlotMap = [];
+var olColorMap = {}; // shared colour picks: slot -> colIdx
+
 function olStartGame() {
   var total = onlinePlayers.length + olAIs;
   if (total < 2) return;
-  var slotMap = onlinePlayers.map(function(p, i) { return { clientId: p.clientId, name: p.name, slot: i }; });
-  channel.publish('start', { size: olSize, numPlayers: total, numAIs: olAIs, slotMap: slotMap });
+  olSlotMap = onlinePlayers.map(function(p, i) { return { clientId: p.clientId, name: p.name, slot: i }; });
+  channel.publish('setup', { size: olSize, numPlayers: total, numAIs: olAIs, numHumans: onlinePlayers.length, slotMap: olSlotMap });
+}
+
+function onOLSetup(msg) {
+  var d = msg.data;
+  olSlotMap = d.slotMap;
+  SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
+  NUM_HUMANS = d.numHumans;
+  mySlot = -1;
+  for (var i = 0; i < olSlotMap.length; i++) {
+    if (olSlotMap[i].clientId === myClientId) { mySlot = olSlotMap[i].slot; break; }
+  }
+  // Reset colour picks
+  olColorMap = {};
+  defaultColorMap();
+  for (var i = 0; i < NUM_PLAYERS; i++) colorMap[i] = -1;
+  // Show online colour picker
+  hideOLPanels();
+  showOLPanel('ol-colours');
+  renderOLColourPicker();
+}
+
+function onOLColourPick(msg) {
+  var d = msg.data;
+  if (d.colIdx < 0) {
+    delete olColorMap[d.slot];
+    colorMap[d.slot] = -1;
+  } else {
+    olColorMap[d.slot] = d.colIdx;
+    colorMap[d.slot] = d.colIdx;
+  }
+  renderOLColourPicker();
+}
+
+function renderOLColourPicker() {
+  var container = document.getElementById('ol-cp-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Build taken map from all picks
+  var taken = {};
+  for (var s in olColorMap) taken[olColorMap[s]] = parseInt(s);
+
+  // Show all human slots
+  for (var p = 0; p < NUM_HUMANS; p++) {
+    var row = document.createElement('div');
+    row.className = 'cp-player';
+
+    var lbl = document.createElement('div');
+    lbl.className = 'cp-player-label';
+    lbl.textContent = olSlotMap[p].name + (p === mySlot ? ' (you)' : '');
+    lbl.style.minWidth = '80px';
+    row.appendChild(lbl);
+
+    if (p === mySlot) {
+      // Show swatches for own slot
+      var swatches = document.createElement('div');
+      swatches.className = 'cp-swatches';
+      for (var ci = 0; ci < COLORS.length; ci++) {
+        var sw = document.createElement('div');
+        sw.className = 'cp-swatch';
+        sw.style.background = COLORS[ci].dot;
+        if (COLORS[ci].dotCol === '#333') sw.style.border = '2px solid #ccc';
+        if (COLORS[ci].dot === '#2a2a2a') sw.style.border = '2px solid #666';
+        var myPick = olColorMap[mySlot];
+        if (myPick === ci) {
+          sw.classList.add('selected');
+          var chk = document.createElement('div');
+          chk.className = 'cp-check';
+          chk.textContent = '✓';
+          chk.style.color = COLORS[ci].dotCol;
+          sw.appendChild(chk);
+        } else if (taken[ci] !== undefined && taken[ci] !== mySlot) {
+          sw.classList.add('taken');
+        }
+        (function(colIdx) {
+          sw.onclick = function() {
+            if (taken[colIdx] !== undefined && taken[colIdx] !== mySlot) return;
+            var newVal = (olColorMap[mySlot] === colIdx) ? -1 : colIdx;
+            channel.publish('colourpick', { slot: mySlot, colIdx: newVal });
+          };
+        })(ci);
+        swatches.appendChild(sw);
+      }
+      row.appendChild(swatches);
+    } else {
+      // Show what they picked or "choosing..."
+      var info = document.createElement('div');
+      info.style.cssText = 'font-size:12px;color:#999;';
+      if (olColorMap[p] !== undefined && olColorMap[p] >= 0) {
+        var pip = document.createElement('span');
+        pip.style.cssText = 'display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:middle;margin-right:4px;background:' + COLORS[olColorMap[p]].dot;
+        info.appendChild(pip);
+        info.appendChild(document.createTextNode(COLORS[olColorMap[p]].name));
+      } else {
+        info.textContent = 'choosing…';
+      }
+      row.appendChild(info);
+    }
+    container.appendChild(row);
+  }
+
+  // Update start button (host only)
+  var startBtn = document.getElementById('ol-cp-start');
+  if (startBtn) {
+    var unselected = 0;
+    for (var i = 0; i < NUM_HUMANS; i++) {
+      if (olColorMap[i] === undefined || olColorMap[i] < 0) unselected++;
+    }
+    if (isHost) {
+      startBtn.style.display = '';
+      if (unselected > 0) {
+        startBtn.textContent = unselected + ' player' + (unselected > 1 ? 's' : '') + ' choosing…';
+        startBtn.style.opacity = '0.5';
+      } else {
+        startBtn.textContent = 'Start game';
+        startBtn.style.opacity = '1';
+      }
+    } else {
+      startBtn.style.display = 'none';
+    }
+  }
+
+  // Guest waiting text
+  var guestWait = document.getElementById('ol-cp-wait');
+  if (guestWait) {
+    var allPicked = true;
+    for (var i = 0; i < NUM_HUMANS; i++) {
+      if (olColorMap[i] === undefined || olColorMap[i] < 0) { allPicked = false; break; }
+    }
+    if (!isHost) {
+      guestWait.style.display = '';
+      guestWait.textContent = allPicked ? 'Waiting for host to start…' : 'Pick your colour!';
+    } else {
+      guestWait.style.display = 'none';
+    }
+  }
+}
+
+function olConfirmColours() {
+  // Only host can confirm
+  if (!isHost) return;
+  for (var i = 0; i < NUM_HUMANS; i++) {
+    if (olColorMap[i] === undefined || olColorMap[i] < 0) return;
+  }
+  // Assign AI colours from leftovers
+  var usedSet = {};
+  for (var i = 0; i < NUM_HUMANS; i++) usedSet[olColorMap[i]] = true;
+  var available = [];
+  for (var i = 0; i < COLORS.length; i++) if (!usedSet[i]) available.push(i);
+  for (var i = available.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var tmp = available[i]; available[i] = available[j]; available[j] = tmp;
+  }
+  var finalMap = {};
+  for (var i = 0; i < NUM_HUMANS; i++) finalMap[i] = olColorMap[i];
+  for (var a = 0; a < NUM_AIS; a++) finalMap[NUM_HUMANS + a] = available[a % available.length];
+
+  channel.publish('start', { size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap });
 }
 
 function onOLStart(msg) {
@@ -1144,7 +1309,11 @@ function onOLStart(msg) {
   mySlot = -1;
   for (var i = 0; i < d.slotMap.length; i++) if (d.slotMap[i].clientId === myClientId) { mySlot = d.slotMap[i].slot; break; }
   wins = []; for (var i = 0; i < COLORS.length; i++) wins.push(0);
+  // Apply colour map
   defaultColorMap();
+  if (d.colorMap) {
+    for (var k in d.colorMap) colorMap[parseInt(k)] = d.colorMap[k];
+  }
   // Set player names from slot map
   playerNames = [];
   for (var i = 0; i < d.numPlayers; i++) {
@@ -1420,6 +1589,17 @@ function updateOLUI() {
     </div>
     <div style="text-align:center;">
       <button class="mbtn primary" onclick="hideOLPanels()">Got it</button>
+    </div>
+  </div>
+</div>
+
+<div class="ol-panel" id="ol-colours" style="display:none;">
+  <div class="ol-card" style="max-width:480px;">
+    <h2>Choose your colour</h2>
+    <div id="ol-cp-list"></div>
+    <div class="ol-info" id="ol-cp-wait" style="margin-top:0.6rem;display:none;"></div>
+    <div style="margin-top:0.6rem;">
+      <button class="mbtn primary" id="ol-cp-start" onclick="olConfirmColours()" style="display:none;">Waiting…</button>
     </div>
   </div>
 </div>
