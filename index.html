@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chain Reaction</title>
+<script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -101,6 +102,52 @@
   .win-sub { font-size: 13px; color: #9a7a6a; margin-bottom: 1rem; }
   .win-card .btn { background: var(--bg); color: #fff; padding: 8px 20px; font-size: 13px; }
   .win-card .btn:hover { filter: brightness(1.1); }
+
+  .player-tag .you-badge { font-size: 8px; opacity: 0.6; }
+  .online-info { font-size: 11px; opacity: 0.7; text-align: center; margin-bottom: 0.4rem; }
+
+  /* ONLINE PANELS */
+  .ol-panel {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 50;
+    display: flex; align-items: center; justify-content: center; backdrop-filter: blur(3px);
+  }
+  .ol-card {
+    background: var(--ui-bg); color: var(--text-dark); border-radius: 20px;
+    padding: 1.8rem 2.2rem; max-width: 400px; width: 90%;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.2); text-align: center;
+  }
+  .ol-card h2 { font-size: 1.05rem; margin-bottom: 0.8rem; font-weight: 700; }
+  .ol-card input {
+    width: 100%; padding: 10px 14px; border-radius: 12px; border: 1.5px solid #ddd;
+    font-size: 14px; text-align: center; margin-bottom: 0.5rem; outline: none; color: var(--text-dark);
+  }
+  .ol-card input:focus { border-color: var(--bg); }
+  .mbtn {
+    padding: 9px 20px; border-radius: 20px; border: none;
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 0.2rem;
+  }
+  .mbtn.primary { background: var(--bg); color: #fff; }
+  .mbtn.primary:hover { filter: brightness(1.1); }
+  .mbtn.secondary { background: #eee; color: var(--text-dark); }
+  .mbtn.secondary:hover { background: #ddd; }
+  .ol-code {
+    font-size: 2rem; font-weight: 800; letter-spacing: 0.15em;
+    background: #f5f0ea; padding: 0.5rem 1.5rem; border-radius: 12px;
+    margin: 0.5rem 0; display: inline-block;
+  }
+  .ol-info { font-size: 12px; color: #999; margin-top: 0.3rem; }
+  .ol-row { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; align-items: center; margin-bottom: 0.4rem; }
+  .ol-label { font-size: 12px; font-weight: 600; color: #999; white-space: nowrap; margin-right: 2px; }
+  .ol-card .sbtn {
+    padding: 4px 9px; border-radius: 14px; border: 1.5px solid #ddd;
+    background: #fff; color: var(--text-dark);
+    font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+  }
+  .ol-card .sbtn:hover { border-color: #bbb; }
+  .ol-card .sbtn.active { border-color: var(--bg); background: #fef0ea; color: var(--bg); }
+  .ol-players { text-align: left; margin: 0.5rem 0; }
+  .ol-players div { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; font-weight: 500; }
+  .ol-players .lpip { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -119,7 +166,10 @@
   <span class="label">Grid:</span>
   <div id="size-btns" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
   <button class="btn" onclick="resetGame()" style="margin-left:6px;">New game</button>
+  <button class="btn" onclick="showOLPanel('ol-menu')" style="margin-left:2px;">Online game</button>
 </div>
+
+<div class="online-info" id="online-info" style="display:none;"></div>
 
 <div class="row sort-btn">
   <button class="btn" id="sort-btn" onclick="toggleSort()">Sort by squares</button>
@@ -555,6 +605,363 @@ function updateUI() {
 wins = [];
 for (var i = 0; i < 20; i++) wins.push(0);
 buildPlayerButtons(); buildAIButtons(); buildSizeButtons(); resetGame();
+
+// ======== ONLINE GAME (layered on top) ========
+var ABLY_KEY = 'XAfEQA.obgo3w:S3vaSSyobeh_Kkt5JDZtkFN7Y3C8nMxwJHeC0Kcf4FY';
+var ably, channel, roomCode, myClientId, myName, isHost;
+var onlinePlayers = [], mySlot = -1, gameMode = 'local';
+var olAIs = 0, olHumans = 2, olSize = 5;
+var moveQueue = [], processing = false;
+
+function showOLPanel(id) {
+  ['ol-menu','ol-create','ol-join','ol-lobby'].forEach(function(p) {
+    var el = document.getElementById(p); if (el) el.style.display = 'none';
+  });
+  var el = document.getElementById(id); if (el) el.style.display = '';
+  if (id === 'ol-create') buildOLCreateBtns();
+}
+function hideOLPanels() {
+  ['ol-menu','ol-create','ol-join','ol-lobby'].forEach(function(p) {
+    var el = document.getElementById(p); if (el) el.style.display = 'none';
+  });
+}
+
+function genCode() {
+  var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', code = '';
+  for (var i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+function getOLName() { var n = (document.getElementById('ol-name') || {}).value || ''; return n.trim() || 'Player'; }
+
+function buildOLNumRow(containerId, min, max, current, cb) {
+  var c = document.getElementById(containerId); if (!c) return; c.innerHTML = '';
+  for (var i = min; i <= max; i++) {
+    var b = document.createElement('button'); b.className = 'sbtn' + (i === current ? ' active' : ''); b.textContent = i;
+    (function(n) { b.onclick = function() { cb(n); var bs = this.parentNode.children; for (var j = 0; j < bs.length; j++) bs[j].className = 'sbtn'; this.className = 'sbtn active'; }; })(i);
+    c.appendChild(b);
+  }
+}
+function buildOLSizeRow(containerId, current, cb) {
+  var c = document.getElementById(containerId); if (!c) return; c.innerHTML = '';
+  SIZES.forEach(function(s) {
+    var b = document.createElement('button'); b.className = 'sbtn' + (s === current ? ' active' : ''); b.textContent = s + '×' + s;
+    (function(n) { b.onclick = function() { cb(n); var bs = this.parentNode.children; for (var j = 0; j < bs.length; j++) bs[j].className = 'sbtn'; this.className = 'sbtn active'; }; })(s);
+    c.appendChild(b);
+  });
+}
+function buildOLCreateBtns() {
+  buildOLNumRow('ol-c-humans', 1, 20, olHumans, function(n) { olHumans = n; if (olHumans + olAIs > 20) olAIs = 20 - olHumans; buildOLCreateBtns(); });
+  buildOLNumRow('ol-c-ais', 0, Math.min(20 - olHumans, 19), olAIs, function(n) { olAIs = n; });
+  buildOLSizeRow('ol-c-size', olSize, function(n) { olSize = n; });
+}
+
+function initAbly(cb) {
+  myClientId = 'p_' + Math.random().toString(36).substr(2, 8);
+  ably = new Ably.Realtime({ key: ABLY_KEY, clientId: myClientId });
+  ably.connection.on('connected', function() { cb(); });
+}
+
+function olCreateRoom() {
+  myName = getOLName(); isHost = true; roomCode = genCode();
+  if (olHumans + olAIs < 2) olAIs = Math.max(1, olAIs);
+  initAbly(function() {
+    channel = ably.channels.get('cr-' + roomCode);
+    channel.presence.enter({ name: myName, host: true });
+    channel.presence.subscribe(updateOLLobby);
+    channel.subscribe('start', onOLStart);
+    channel.subscribe('move', onOLMove);
+    channel.subscribe('newgame', onOLNewGame);
+    showOLPanel('ol-lobby');
+    document.getElementById('ol-lob-code').textContent = roomCode;
+    document.getElementById('ol-lob-host').style.display = '';
+    document.getElementById('ol-lob-guest').style.display = 'none';
+  });
+}
+
+function olJoinRoom() {
+  myName = getOLName(); isHost = false;
+  roomCode = (document.getElementById('ol-join-code').value || '').trim().toUpperCase();
+  if (!roomCode) return;
+  initAbly(function() {
+    channel = ably.channels.get('cr-' + roomCode);
+    channel.presence.enter({ name: myName, host: false });
+    channel.presence.subscribe(updateOLLobby);
+    channel.subscribe('start', onOLStart);
+    channel.subscribe('move', onOLMove);
+    channel.subscribe('newgame', onOLNewGame);
+    showOLPanel('ol-lobby');
+    document.getElementById('ol-lob-code').textContent = roomCode;
+    document.getElementById('ol-lob-host').style.display = 'none';
+    document.getElementById('ol-lob-guest').style.display = '';
+  });
+}
+
+function updateOLLobby() {
+  channel.presence.get(function(err, members) {
+    if (err) return;
+    onlinePlayers = members.map(function(m) { return { clientId: m.clientId, name: m.data.name, host: m.data.host }; });
+    var list = document.getElementById('ol-lob-list'); list.innerHTML = '';
+    for (var i = 0; i < onlinePlayers.length; i++) {
+      var div = document.createElement('div');
+      var pip = document.createElement('div'); pip.className = 'lpip'; pip.style.background = COLORS[i].dot;
+      div.appendChild(pip);
+      var txt = onlinePlayers[i].name;
+      if (onlinePlayers[i].host) txt += ' (host)';
+      if (onlinePlayers[i].clientId === myClientId) txt += ' — you';
+      div.appendChild(document.createTextNode(txt));
+      list.appendChild(div);
+    }
+    if (isHost) {
+      var total = onlinePlayers.length + olAIs;
+      document.getElementById('ol-lob-info').textContent = onlinePlayers.length + '/' + olHumans + ' humans' + (olAIs > 0 ? ' + ' + olAIs + ' AI' + (olAIs > 1 ? 's' : '') : '');
+      var btn = document.getElementById('ol-lob-start');
+      if (total >= 2) { btn.textContent = 'Start (' + onlinePlayers.length + ' humans + ' + olAIs + ' AIs)'; btn.style.opacity = '1'; }
+      else { btn.textContent = 'Need 2+ total players'; btn.style.opacity = '0.5'; }
+    } else {
+      document.getElementById('ol-lob-info').textContent = onlinePlayers.length + ' players in room';
+    }
+  });
+}
+
+function olStartGame() {
+  var total = onlinePlayers.length + olAIs;
+  if (total < 2) return;
+  var slotMap = onlinePlayers.map(function(p, i) { return { clientId: p.clientId, name: p.name, slot: i }; });
+  channel.publish('start', { size: olSize, numPlayers: total, numAIs: olAIs, slotMap: slotMap });
+}
+
+function onOLStart(msg) {
+  var d = msg.data;
+  gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
+  mySlot = -1;
+  for (var i = 0; i < d.slotMap.length; i++) if (d.slotMap[i].clientId === myClientId) { mySlot = d.slotMap[i].slot; break; }
+  wins = []; for (var i = 0; i < 20; i++) wins.push(0);
+  hideOLPanels();
+  document.getElementById('online-info').style.display = '';
+  document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + COLORS[mySlot].name + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); updateUI();
+  olScheduleAI();
+}
+
+function onOLNewGame() {
+  document.getElementById('overlay').style.display = 'none';
+  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); updateUI();
+  moveQueue = []; processing = false;
+  olScheduleAI();
+}
+
+function onOLMove(msg) { moveQueue.push(msg.data); olProcessQueue(); }
+
+function olProcessQueue() {
+  if (processing || !moveQueue.length) return;
+  processing = true; var m = moveQueue.shift();
+  if (m.player !== turn) { processing = false; olProcessQueue(); return; }
+  olExecuteMove(m.r, m.c, function() { processing = false; olProcessQueue(); });
+}
+
+function olExecuteMove(r, c, cb) {
+  var cell = board[r][c];
+  if (!placed[turn]) {
+    if (cell.owner >= 0) { if (cb) cb(); return; }
+    cell.owner = turn; cell.dots = 3; placed[turn] = true;
+    updateCell(r, c); updateCounts();
+    processExplosions(function() {
+      if (allPlaced() && olCheckWin()) { if (cb) cb(); return; }
+      olAdvanceTurn(); if (cb) cb();
+    });
+  } else {
+    if (cell.owner !== turn) { if (cb) cb(); return; }
+    cell.dots++;
+    updateCell(r, c);
+    processExplosions(function() {
+      if (olCheckWin()) { if (cb) cb(); return; }
+      olAdvanceTurn(); if (cb) cb();
+    });
+  }
+}
+
+function olAdvanceTurn() {
+  var tries = 0;
+  do { turn = (turn + 1) % NUM_PLAYERS; tries++; } while (!alive[turn] && tries <= NUM_PLAYERS);
+  updateOLUI();
+  olScheduleAI();
+}
+
+function olScheduleAI() {
+  if (!isAI(turn) || !alive[turn]) return;
+  if (!isHost) return;
+  setTimeout(function() { olDoAI(); }, SIZE >= 20 ? 100 : 400);
+}
+
+function olDoAI() {
+  if (animating) { setTimeout(olDoAI, 100); return; }
+  var pick;
+  if (!placed[turn]) {
+    var empty = [];
+    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (board[r][c].owner < 0) empty.push([r, c]);
+    if (!empty.length) return;
+    pick = empty[Math.floor(Math.random() * empty.length)];
+  } else {
+    var own = [];
+    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (board[r][c].owner === turn) own.push([r, c]);
+    if (!own.length) return;
+    pick = own[Math.floor(Math.random() * own.length)];
+  }
+  channel.publish('move', { r: pick[0], c: pick[1], player: turn });
+}
+
+function olCheckWin() {
+  if (!allPlaced()) return false;
+  var counts = getCounts();
+  for (var i = 0; i < NUM_PLAYERS; i++) if (placed[i] && counts[i] === 0) alive[i] = false;
+  var aliveCount = 0, winner = -1;
+  for (var i = 0; i < NUM_PLAYERS; i++) if (alive[i]) { aliveCount++; winner = i; }
+  if (aliveCount === 1) { olShowWin(winner); return true; }
+  return false;
+}
+
+function olShowWin(p) {
+  animating = false; wins[p]++;
+  document.getElementById('win-title').textContent = COLORS[p].name + ' wins!';
+  document.getElementById('win-title').style.color = COLORS[p].dot;
+  // Replace the play again button
+  var ov = document.getElementById('overlay');
+  var card = ov.querySelector('.win-card');
+  var oldBtn = card.querySelector('.btn');
+  if (isHost) {
+    oldBtn.textContent = 'Play again';
+    oldBtn.onclick = function() { channel.publish('newgame', {}); };
+  } else {
+    oldBtn.textContent = 'Waiting for host…';
+    oldBtn.onclick = null;
+    oldBtn.style.opacity = '0.5';
+    oldBtn.style.cursor = 'default';
+  }
+  ov.style.display = 'flex';
+  renderPlayerBar();
+}
+
+function olLeave() {
+  if (channel) { try { channel.presence.leave(); channel.detach(); } catch(e) {} channel = null; }
+  gameMode = 'local'; mySlot = -1;
+  document.getElementById('online-info').style.display = 'none';
+  // Restore the play again button
+  var card = document.querySelector('.win-card .btn');
+  if (card) { card.textContent = 'Play again'; card.onclick = resetGame; card.style.opacity = ''; card.style.cursor = ''; }
+  resetGame();
+}
+
+// Override handleClick for online mode
+var _origHandleClick = handleClick;
+handleClick = function(r, c) {
+  if (gameMode === 'online') {
+    if (animating) return;
+    if (turn !== mySlot || isAI(turn)) return;
+    var cell = board[r][c];
+    if (!placed[turn]) { if (cell.owner >= 0) return; }
+    else { if (cell.owner !== turn) return; }
+    channel.publish('move', { r: r, c: c, player: turn });
+    return;
+  }
+  _origHandleClick(r, c);
+};
+
+// Override renderPlayerBar to add (you) badge in online mode
+var _origRenderPlayerBar = renderPlayerBar;
+renderPlayerBar = function() {
+  _origRenderPlayerBar();
+  if (gameMode === 'online' && mySlot >= 0) {
+    var tag = document.getElementById('ptag-' + mySlot);
+    if (tag) {
+      var top = tag.querySelector('.tag-top');
+      if (top && !top.querySelector('.you-badge')) {
+        var you = document.createElement('span'); you.className = 'you-badge'; you.textContent = ' (you)';
+        top.appendChild(you);
+      }
+    }
+  }
+};
+
+// Override updateUI for online mode
+var _origUpdateUI = updateUI;
+updateUI = function() {
+  if (gameMode === 'online') { updateOLUI(); return; }
+  _origUpdateUI();
+};
+
+function updateOLUI() {
+  for (var i = 0; i < NUM_PLAYERS; i++) {
+    var tag = document.getElementById('ptag-' + i); if (!tag) continue;
+    tag.className = 'player-tag';
+    if (i === turn) tag.classList.add('active');
+    if (!alive[i]) tag.classList.add('dead');
+  }
+  var label = document.getElementById('turn-label');
+  var isMine = turn === mySlot;
+  if (!placed[turn]) {
+    if (isAI(turn)) label.textContent = COLORS[turn].name + ' (AI) placing…';
+    else if (isMine) label.textContent = 'Your turn — place your first square';
+    else label.textContent = COLORS[turn].name + "'s turn — placing…";
+  } else {
+    if (isAI(turn)) label.textContent = COLORS[turn].name + ' (AI) thinking…';
+    else if (isMine) label.textContent = 'Your turn';
+    else label.textContent = COLORS[turn].name + "'s turn";
+  }
+}
 </script>
+
+<!-- ONLINE PANELS -->
+<div class="ol-panel" id="ol-menu" style="display:none;">
+  <div class="ol-card">
+    <h2>Online game</h2>
+    <input type="text" id="ol-name" placeholder="Your name" maxlength="12">
+    <div style="margin-top:0.3rem;">
+      <button class="mbtn primary" onclick="showOLPanel('ol-create')">Create room</button>
+      <button class="mbtn secondary" onclick="showOLPanel('ol-join')">Join room</button>
+      <button class="mbtn secondary" onclick="hideOLPanels()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="ol-panel" id="ol-create" style="display:none;">
+  <div class="ol-card">
+    <h2>Create room</h2>
+    <div class="ol-row"><span class="ol-label">Human slots:</span><div id="ol-c-humans"></div></div>
+    <div class="ol-row"><span class="ol-label">AIs:</span><div id="ol-c-ais"></div></div>
+    <div class="ol-row"><span class="ol-label">Grid:</span><div id="ol-c-size"></div></div>
+    <div style="margin-top:0.6rem;">
+      <button class="mbtn primary" onclick="olCreateRoom()">Create</button>
+      <button class="mbtn secondary" onclick="showOLPanel('ol-menu')">Back</button>
+    </div>
+  </div>
+</div>
+
+<div class="ol-panel" id="ol-join" style="display:none;">
+  <div class="ol-card">
+    <h2>Join a room</h2>
+    <input type="text" id="ol-join-code" placeholder="Room code" maxlength="6" style="text-transform:uppercase;">
+    <div style="margin-top:0.3rem;">
+      <button class="mbtn primary" onclick="olJoinRoom()">Join</button>
+      <button class="mbtn secondary" onclick="showOLPanel('ol-menu')">Back</button>
+    </div>
+  </div>
+</div>
+
+<div class="ol-panel" id="ol-lobby" style="display:none;">
+  <div class="ol-card">
+    <h2>Room</h2>
+    <div class="ol-code" id="ol-lob-code"></div>
+    <div class="ol-info">Share this code with friends</div>
+    <div class="ol-players" id="ol-lob-list"></div>
+    <div class="ol-info" id="ol-lob-info"></div>
+    <div id="ol-lob-host" style="display:none;margin-top:0.6rem;">
+      <button class="mbtn primary" id="ol-lob-start" onclick="olStartGame()">Waiting…</button>
+    </div>
+    <div id="ol-lob-guest" style="display:none;">
+      <div class="ol-info" style="margin-top:0.8rem;">Waiting for host to start…</div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
