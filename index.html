@@ -49,19 +49,49 @@
     display: flex; flex-direction: column; align-items: center;
     font-size: 11px; font-weight: 700;
     padding: 6px 14px 5px; border-radius: 14px; min-width: 52px;
-    background: rgba(255,255,255,0.15); transition: all 0.2s; opacity: 0.55;
+    background: var(--ui-bg); color: var(--text-dark); opacity: 1;
+    transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   }
   .player-tag .tag-top { display: flex; align-items: center; gap: 4px; }
   .player-tag .pip { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-  .player-tag .tag-line { width: 100%; height: 1px; background: rgba(255,255,255,0.3); margin: 4px 0 3px; }
+  .player-tag .tag-line { width: 100%; height: 1px; background: rgba(0,0,0,0.1); margin: 4px 0 3px; }
   .player-tag .count { font-size: 13px; font-weight: 800; }
-  .player-tag.active { background: var(--ui-bg); color: var(--text-dark); opacity: 1; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+  .player-tag.active { background: #ffe066; color: var(--text-dark); box-shadow: 0 2px 12px rgba(255,200,0,0.3); }
   .player-tag.active .tag-line { background: rgba(0,0,0,0.12); }
-  .player-tag.dead { opacity: 0.2; }
+  .player-tag.dead { opacity: 0.35; background: rgba(255,255,255,0.15); color: #fff; box-shadow: none; }
 
   .turn-label { font-size: 11px; font-weight: 600; opacity: 0.8; text-align: center; margin-bottom: 0.4rem; }
 
   .grid-wrap { position: relative; }
+
+  .game-layout {
+    display: flex; gap: 1rem; align-items: flex-start; justify-content: center;
+    width: 100%;
+  }
+
+  .side-lb {
+    background: var(--ui-bg); color: var(--text-dark); border-radius: 14px;
+    padding: 0.8rem 1rem; min-width: 140px; max-width: 180px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.1); flex-shrink: 0;
+  }
+  .side-lb-title {
+    font-size: 12px; font-weight: 700; margin-bottom: 0.5rem;
+    padding-bottom: 0.4rem; border-bottom: 1px solid #eee;
+  }
+  .side-lb-list { font-size: 12px; }
+  .side-lb-empty { color: #bbb; font-size: 11px; font-style: italic; }
+  .side-lb-row {
+    display: flex; align-items: center; gap: 6px; padding: 3px 0;
+  }
+  .side-lb-row .lb-rank { font-weight: 700; min-width: 20px; font-size: 11px; }
+  .side-lb-row .lb-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .side-lb-row .lb-name { font-weight: 500; }
+  .side-lb-row.lb-alive { opacity: 0.4; }
+
+  @media (max-width: 700px) {
+    .game-layout { flex-direction: column; align-items: center; }
+    .side-lb { max-width: 100%; min-width: unset; width: 100%; order: -1; }
+  }
   .grid {
     display: grid; gap: var(--gap); width: fit-content;
     padding: 8px; background: rgba(0,0,0,0.08); border-radius: 14px;
@@ -148,6 +178,72 @@
   .ol-players { text-align: left; margin: 0.5rem 0; }
   .ol-players div { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; font-weight: 500; }
   .ol-players .lpip { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+  /* DEATH OVERLAY */
+  .death-panel {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 45;
+    display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);
+  }
+  .death-card {
+    background: var(--ui-bg); color: var(--text-dark); border-radius: 20px;
+    padding: 2rem 2.5rem; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    max-width: 320px; width: 85%;
+  }
+  .death-card .death-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  .death-card h2 { font-size: 1.3rem; font-weight: 700; margin-bottom: 0.3rem; }
+  .death-card p { font-size: 13px; color: #9a7a6a; margin-bottom: 1rem; }
+
+  /* MOBILE */
+  @media (max-width: 600px) {
+    body { padding: 0.6rem 0.3rem; }
+    h1 { font-size: 1.2rem; margin-bottom: 0.4rem; }
+    .btn { padding: 7px 12px; font-size: 12px; min-height: 32px; }
+    .row { gap: 4px; margin-bottom: 0.35rem; }
+    .label { font-size: 11px; }
+    .player-tag { padding: 5px 10px 4px; min-width: 44px; font-size: 10px; }
+    .player-tag .count { font-size: 12px; }
+    .turn-label { font-size: 12px; }
+    .grid-wrap { max-width: 100vw; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .ol-card { padding: 1.4rem 1.2rem; width: 92%; }
+    .ol-card h2 { font-size: 1rem; }
+    .mbtn { padding: 10px 18px; font-size: 14px; min-height: 40px; }
+    .ol-card .sbtn { padding: 6px 11px; font-size: 12px; min-height: 32px; }
+    .ol-card input { font-size: 16px; padding: 12px 14px; }
+    .online-info { font-size: 12px; }
+    .death-card { padding: 1.5rem 1.2rem; }
+  }
+
+  /* COLOUR PICKER */
+  .cp-panel {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 48;
+    display: flex; align-items: center; justify-content: center; backdrop-filter: blur(3px);
+  }
+  .cp-card {
+    background: var(--ui-bg); color: var(--text-dark); border-radius: 20px;
+    padding: 1.5rem 1.8rem; max-width: 440px; width: 92%;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.2); text-align: center;
+    max-height: 85vh; overflow-y: auto;
+  }
+  .cp-card h2 { font-size: 1.05rem; margin-bottom: 0.8rem; font-weight: 700; }
+  .cp-player { display: flex; align-items: center; gap: 8px; margin-bottom: 0.6rem; flex-wrap: wrap; }
+  .cp-player-label { font-size: 12px; font-weight: 600; min-width: 60px; text-align: left; }
+  .cp-name {
+    padding: 4px 8px; border-radius: 8px; border: 1.5px solid #ddd; font-size: 12px;
+    width: 90px; outline: none; color: var(--text-dark);
+  }
+  .cp-name:focus { border-color: var(--bg); }
+  .cp-swatches { display: flex; gap: 4px; flex-wrap: wrap; }
+  .cp-swatch {
+    width: 28px; height: 28px; border-radius: 50%; border: 2.5px solid transparent;
+    cursor: pointer; transition: all 0.15s; position: relative;
+  }
+  .cp-swatch:hover { transform: scale(1.15); }
+  .cp-swatch.selected { border-color: var(--text-dark); box-shadow: 0 0 0 2px rgba(0,0,0,0.15); }
+  .cp-swatch.taken { opacity: 0.15; cursor: default; pointer-events: none; }
+  .cp-swatch .cp-check {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800;
+  }
 </style>
 </head>
 <body>
@@ -155,7 +251,7 @@
 <h1>Chain reaction</h1>
 
 <div class="row">
-  <span class="label">Players:</span>
+  <span class="label">Humans:</span>
   <div id="player-btns" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;"></div>
 </div>
 <div class="row">
@@ -166,7 +262,8 @@
   <span class="label">Grid:</span>
   <div id="size-btns" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
   <button class="btn" onclick="resetGame()" style="margin-left:6px;">New game</button>
-  <button class="btn" onclick="showOLPanel('ol-menu')" style="margin-left:2px;">Online game</button>
+  <button class="btn" onclick="showOLPanel('ol-menu')" style="margin-left:2px;">Online</button>
+  <button class="btn" onclick="showOLPanel('ol-help')" style="margin-left:2px;">How to play</button>
 </div>
 
 <div class="online-info" id="online-info" style="display:none;"></div>
@@ -177,57 +274,95 @@
 <div class="player-bar" id="player-bar"></div>
 <div class="turn-label" id="turn-label"></div>
 
-<div class="grid-wrap" id="grid-wrap">
-  <div class="grid" id="grid"></div>
-  <div class="overlay" id="overlay" style="display:none;">
-    <div class="win-card">
-      <div class="win-title" id="win-title"></div>
-      <div class="win-sub">All opponents eliminated</div>
-      <button class="btn" onclick="resetGame()">Play again</button>
+<div class="game-layout">
+  <div class="grid-wrap" id="grid-wrap">
+    <div class="grid" id="grid"></div>
+    <div class="overlay" id="overlay" style="display:none;">
+      <div class="win-card">
+        <div class="win-title" id="win-title"></div>
+        <div class="win-sub">All opponents eliminated</div>
+        <button class="btn" onclick="skipColourPicker=true;resetGame()">Play again</button>
+      </div>
+    </div>
+  </div>
+  <div class="side-lb" id="side-lb">
+    <div class="side-lb-title">Leaderboard</div>
+    <div class="side-lb-list" id="side-lb-list">
+      <div class="side-lb-empty">No eliminations yet</div>
+    </div>
+  </div>
+</div>
+
+<div class="death-panel" id="death-panel" style="display:none;">
+  <div class="death-card">
+    <div class="death-icon">💀</div>
+    <h2 id="death-title">You died!</h2>
+    <p id="death-sub">All your squares were captured</p>
+    <button class="btn" onclick="dismissDeath()" style="background:var(--bg);color:#fff;padding:10px 24px;font-size:14px;">Watch the rest</button>
+  </div>
+</div>
+
+<div class="cp-panel" id="cp-panel" style="display:none;">
+  <div class="cp-card">
+    <h2>Setup players</h2>
+    <div id="cp-players"></div>
+    <div style="margin-top:0.8rem;">
+      <button class="mbtn primary" onclick="confirmColours()" id="cp-start-btn">0 players need colour</button>
+      <button class="mbtn secondary" onclick="randomiseColours()">Randomise</button>
+      <button class="mbtn secondary" onclick="cancelColourPicker()">Cancel</button>
     </div>
   </div>
 </div>
 
 <script>
 var COLORS = [
-  { name:'Red',       dot:'#ef7b7b', shadow:'#c45a5a' },
-  { name:'Blue',      dot:'#5cc8d8', shadow:'#3a9aaa' },
-  { name:'Green',     dot:'#6ecf6e', shadow:'#4aa64a' },
-  { name:'Purple',    dot:'#b07ed8', shadow:'#8a5cb0' },
-  { name:'Amber',     dot:'#e8b84c', shadow:'#c49530' },
-  { name:'Pink',      dot:'#e87ea8', shadow:'#c05a88' },
-  { name:'Teal',      dot:'#4db6ac', shadow:'#2e8b82' },
-  { name:'Orange',    dot:'#f0944d', shadow:'#c47030' },
-  { name:'Indigo',    dot:'#7986cb', shadow:'#5460a0' },
-  { name:'Lime',      dot:'#aed55e', shadow:'#88aa3a' },
-  { name:'Crimson',   dot:'#e05555', shadow:'#b83030' },
-  { name:'Sky',       dot:'#64b5f6', shadow:'#3888cc' },
-  { name:'Mint',      dot:'#66d9a0', shadow:'#40b07a' },
-  { name:'Plum',      dot:'#ce93d8', shadow:'#a06aae' },
-  { name:'Gold',      dot:'#ffd54f', shadow:'#ccaa28' },
-  { name:'Coral',     dot:'#ff8a80', shadow:'#d06058' },
-  { name:'Cyan',      dot:'#4dd0e1', shadow:'#28a8b8' },
-  { name:'Olive',     dot:'#a0b860', shadow:'#7a9038' },
-  { name:'Rose',      dot:'#f48fb1', shadow:'#cc6688' },
-  { name:'Slate',     dot:'#90a4ae', shadow:'#607d8b' },
+  { name:'Red',       dot:'#ef7b7b', shadow:'#c45a5a', dotCol:'#fff' },
+  { name:'Blue',      dot:'#5cc8d8', shadow:'#3a9aaa', dotCol:'#fff' },
+  { name:'Green',     dot:'#6ecf6e', shadow:'#4aa64a', dotCol:'#fff' },
+  { name:'Purple',    dot:'#b07ed8', shadow:'#8a5cb0', dotCol:'#fff' },
+  { name:'Amber',     dot:'#e8b84c', shadow:'#c49530', dotCol:'#fff' },
+  { name:'Pink',      dot:'#e87ea8', shadow:'#c05a88', dotCol:'#fff' },
+  { name:'Teal',      dot:'#4db6ac', shadow:'#2e8b82', dotCol:'#fff' },
+  { name:'Orange',    dot:'#f0944d', shadow:'#c47030', dotCol:'#fff' },
+  { name:'Indigo',    dot:'#7986cb', shadow:'#5460a0', dotCol:'#fff' },
+  { name:'Lime',      dot:'#aed55e', shadow:'#88aa3a', dotCol:'#fff' },
+  { name:'Crimson',   dot:'#e05555', shadow:'#b83030', dotCol:'#fff' },
+  { name:'Sky',       dot:'#64b5f6', shadow:'#3888cc', dotCol:'#fff' },
+  { name:'Mint',      dot:'#66d9a0', shadow:'#40b07a', dotCol:'#fff' },
+  { name:'Plum',      dot:'#ce93d8', shadow:'#a06aae', dotCol:'#fff' },
+  { name:'Gold',      dot:'#ffd54f', shadow:'#ccaa28', dotCol:'#fff' },
+  { name:'Coral',     dot:'#ff8a80', shadow:'#d06058', dotCol:'#fff' },
+  { name:'Cyan',      dot:'#4dd0e1', shadow:'#28a8b8', dotCol:'#fff' },
+  { name:'Olive',     dot:'#a0b860', shadow:'#7a9038', dotCol:'#fff' },
+  { name:'Rose',      dot:'#f48fb1', shadow:'#cc6688', dotCol:'#fff' },
+  { name:'Slate',     dot:'#90a4ae', shadow:'#607d8b', dotCol:'#fff' },
+  { name:'White',     dot:'#f0ece6', shadow:'#c8c4be', dotCol:'#333' },
+  { name:'Black',     dot:'#2a2a2a', shadow:'#111',    dotCol:'#fff' },
 ];
 
-var SIZE = 5, NUM_PLAYERS = 2, NUM_AIS = 0;
+var colorMap = []; // colorMap[playerIndex] = COLORS index
+var playerNames = []; // playerNames[playerIndex] = display name
+var elimOrder = []; // tracks elimination order (last = died first)
+function PC(i) { var ci = colorMap[i]; return ci >= 0 ? COLORS[ci] : { name:'?', dot:'#999', shadow:'#666', dotCol:'#fff' }; }
+function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
+function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
+
+var SIZE = 5, NUM_HUMANS = 2, NUM_AIS = 0, NUM_PLAYERS = 2;
 var SIZES = [5, 10, 20, 30];
 var board, turn, animating;
 var placed, alive, wins;
 
 function buildPlayerButtons() {
-  var c = document.getElementById('player-btns');
-  c.innerHTML = '';
-  for (var i = 2; i <= 20; i++) {
+  var c = document.getElementById('player-btns'); c.innerHTML = '';
+  var max = 20 - NUM_AIS;
+  for (var i = 0; i <= max; i++) {
     var b = document.createElement('button');
-    b.className = 'btn' + (i === NUM_PLAYERS ? ' active' : '');
+    b.className = 'btn' + (i === NUM_HUMANS ? ' active' : '');
     b.textContent = i;
     (function(n) {
       b.onclick = function() {
-        NUM_PLAYERS = n;
-        if (NUM_AIS >= NUM_PLAYERS) NUM_AIS = NUM_PLAYERS - 1;
+        NUM_HUMANS = n; NUM_PLAYERS = NUM_HUMANS + NUM_AIS;
+        if (NUM_PLAYERS < 2) { NUM_AIS = 2 - NUM_HUMANS; NUM_PLAYERS = 2; }
         buildPlayerButtons(); buildAIButtons(); resetGame();
       };
     })(i);
@@ -236,15 +371,17 @@ function buildPlayerButtons() {
 }
 
 function buildAIButtons() {
-  var c = document.getElementById('ai-btns');
-  c.innerHTML = '';
-  for (var i = 0; i < NUM_PLAYERS; i++) {
+  var c = document.getElementById('ai-btns'); c.innerHTML = '';
+  var max = 20 - NUM_HUMANS;
+  for (var i = 0; i <= max; i++) {
     var b = document.createElement('button');
     b.className = 'btn' + (i === NUM_AIS ? ' active' : '');
     b.textContent = i;
     (function(n) {
       b.onclick = function() {
-        NUM_AIS = n; buildAIButtons(); resetGame();
+        NUM_AIS = n; NUM_PLAYERS = NUM_HUMANS + NUM_AIS;
+        if (NUM_PLAYERS < 2) { NUM_HUMANS = 2 - NUM_AIS; NUM_PLAYERS = 2; }
+        buildPlayerButtons(); buildAIButtons(); resetGame();
       };
     })(i);
     c.appendChild(b);
@@ -273,12 +410,12 @@ function initBoard() {
     for (var c = 0; c < SIZE; c++) board[r][c] = { owner: -1, dots: 0 };
   }
   turn = 0;
-  placed = []; alive = [];
+  placed = []; alive = []; elimOrder = [];
   for (var i = 0; i < NUM_PLAYERS; i++) { placed.push(false); alive.push(true); }
   animating = false;
 }
 
-function isAI(p) { return p >= NUM_PLAYERS - NUM_AIS; }
+function isAI(p) { return p >= NUM_HUMANS; }
 
 function getCounts() {
   var counts = [];
@@ -289,12 +426,203 @@ function getCounts() {
   return counts;
 }
 
+var skipColourPicker = false;
+
 function resetGame() {
   document.getElementById('overlay').style.display = 'none';
+  document.getElementById('death-panel').style.display = 'none';
   if (!wins) wins = [];
-  while (wins.length < 20) wins.push(0);
-  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); updateUI();
+  while (wins.length < COLORS.length) wins.push(0);
+  if (gameMode === 'local' && !skipColourPicker) {
+    defaultColorMap();
+    showColourPicker();
+    return;
+  }
+  skipColourPicker = false;
+  startGameWithColours();
+}
+
+function startGameWithColours() {
+  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   if (isAI(turn)) setTimeout(aiMove, 400);
+}
+
+// ======== COLOUR PICKER ========
+function showColourPicker() {
+  // Set default names
+  playerNames = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) {
+    if (isAI(i)) playerNames.push('AI ' + (i - NUM_HUMANS + 1));
+    else playerNames.push('Player ' + (i + 1));
+  }
+  // Start everyone unselected (-1)
+  for (var i = 0; i < NUM_PLAYERS; i++) colorMap[i] = -1;
+  document.getElementById('cp-panel').style.display = '';
+  renderColourPicker();
+}
+
+function getHumanTaken() {
+  var taken = {};
+  for (var i = 0; i < NUM_HUMANS; i++) {
+    if (colorMap[i] >= 0) taken[colorMap[i]] = i;
+  }
+  return taken;
+}
+
+function renderColourPicker() {
+  var container = document.getElementById('cp-players');
+  container.innerHTML = '';
+  var taken = getHumanTaken();
+
+  // Only show human players
+  for (var p = 0; p < NUM_HUMANS; p++) {
+    var row = document.createElement('div');
+    row.className = 'cp-player';
+
+    // Name input
+    var nameInp = document.createElement('input');
+    nameInp.className = 'cp-name';
+    nameInp.type = 'text';
+    nameInp.maxLength = 12;
+    nameInp.value = playerNames[p];
+    nameInp.placeholder = 'Name';
+    (function(idx) {
+      nameInp.oninput = function() { playerNames[idx] = this.value || ('Player '+(idx+1)); };
+    })(p);
+    row.appendChild(nameInp);
+
+    var swatches = document.createElement('div');
+    swatches.className = 'cp-swatches';
+    for (var ci = 0; ci < COLORS.length; ci++) {
+      var sw = document.createElement('div');
+      sw.className = 'cp-swatch';
+      sw.style.background = COLORS[ci].dot;
+      if (COLORS[ci].dotCol === '#333') sw.style.border = '2px solid #ccc';
+      if (COLORS[ci].dot === '#2a2a2a') sw.style.border = '2px solid #666';
+      if (colorMap[p] === ci) {
+        sw.classList.add('selected');
+        var chk = document.createElement('div');
+        chk.className = 'cp-check';
+        chk.textContent = '✓';
+        chk.style.color = COLORS[ci].dotCol;
+        sw.appendChild(chk);
+      } else if (taken[ci] !== undefined && taken[ci] !== p) {
+        sw.classList.add('taken');
+      }
+      (function(player, colIdx) {
+        sw.onclick = function() {
+          if (taken[colIdx] !== undefined && taken[colIdx] !== player) return;
+          // Deselect if clicking own current colour
+          if (colorMap[player] === colIdx) { colorMap[player] = -1; }
+          else { colorMap[player] = colIdx; }
+          renderColourPicker();
+        };
+      })(p, ci);
+      swatches.appendChild(sw);
+    }
+    row.appendChild(swatches);
+    container.appendChild(row);
+  }
+
+  // Show how many unselected
+  var unselected = 0;
+  for (var i = 0; i < NUM_HUMANS; i++) if (colorMap[i] < 0) unselected++;
+  var startBtn = document.getElementById('cp-start-btn');
+  if (startBtn) {
+    if (unselected > 0) {
+      startBtn.textContent = unselected + ' player' + (unselected > 1 ? 's' : '') + ' need colour';
+      startBtn.style.opacity = '0.5';
+      startBtn.style.cursor = 'default';
+    } else {
+      startBtn.textContent = 'Start game';
+      startBtn.style.opacity = '';
+      startBtn.style.cursor = '';
+    }
+  }
+}
+
+function randomiseColours() {
+  var available = [];
+  for (var i = 0; i < COLORS.length; i++) available.push(i);
+  // Shuffle
+  for (var i = available.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var tmp = available[i]; available[i] = available[j]; available[j] = tmp;
+  }
+  // Assign to humans first
+  for (var p = 0; p < NUM_HUMANS; p++) colorMap[p] = available[p];
+  renderColourPicker();
+}
+
+function assignAIColours() {
+  // Collect taken colours by humans
+  var usedSet = {};
+  for (var i = 0; i < NUM_HUMANS; i++) if (colorMap[i] >= 0) usedSet[colorMap[i]] = true;
+  // Gather available
+  var available = [];
+  for (var i = 0; i < COLORS.length; i++) if (!usedSet[i]) available.push(i);
+  // Shuffle available
+  for (var i = available.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var tmp = available[i]; available[i] = available[j]; available[j] = tmp;
+  }
+  // Assign to AIs
+  for (var a = 0; a < NUM_AIS; a++) {
+    colorMap[NUM_HUMANS + a] = available[a % available.length];
+  }
+}
+
+function confirmColours() {
+  // Check all humans have picked
+  for (var i = 0; i < NUM_HUMANS; i++) {
+    if (colorMap[i] < 0) return; // can't start yet
+  }
+  assignAIColours();
+  document.getElementById('cp-panel').style.display = 'none';
+  startGameWithColours();
+}
+
+function cancelColourPicker() {
+  document.getElementById('cp-panel').style.display = 'none';
+}
+
+function renderSideLB() {
+  var list = document.getElementById('side-lb-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (elimOrder.length === 0 && !checkGameOver()) {
+    list.innerHTML = '<div class="side-lb-empty">No eliminations yet</div>';
+    return;
+  }
+  // Show alive players at top (dimmed), then eliminated in reverse order
+  var aliveList = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) if (alive[i]) aliveList.push(i);
+
+  // Alive players shown as "still in"
+  for (var a = 0; a < aliveList.length; a++) {
+    var pi = aliveList[a];
+    var row = document.createElement('div');
+    row.className = 'side-lb-row lb-alive';
+    row.innerHTML = '<span class="lb-rank">—</span><span class="lb-pip" style="background:'+PC(pi).dot+'"></span><span class="lb-name">' + PN(pi) + '</span>';
+    list.appendChild(row);
+  }
+
+  // Eliminated in reverse (most recent death first = highest placement)
+  for (var e = elimOrder.length - 1; e >= 0; e--) {
+    var pi = elimOrder[e];
+    var rank = NUM_PLAYERS - e;
+    var medal = rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
+    var row = document.createElement('div');
+    row.className = 'side-lb-row';
+    row.innerHTML = '<span class="lb-rank">' + medal + '</span><span class="lb-pip" style="background:'+PC(pi).dot+'"></span><span class="lb-name">' + PN(pi) + '</span>';
+    list.appendChild(row);
+  }
+}
+
+function checkGameOver() {
+  var c = 0;
+  for (var i = 0; i < NUM_PLAYERS; i++) if (alive[i]) c++;
+  return c <= 1;
 }
 
 function applyCellSize() {
@@ -354,11 +682,20 @@ function renderPlayerBar() {
     top.className = 'tag-top';
     var pip = document.createElement('div');
     pip.className = 'pip';
-    pip.style.background = COLORS[i].dot;
+    pip.style.background = PC(i).dot;
     top.appendChild(pip);
-    var txt = COLORS[i].name;
+    var txt = PN(i);
     if (isAI(i)) txt += ' ᴬᴵ';
     top.appendChild(document.createTextNode(txt));
+    if (!alive[i]) {
+      var place = elimOrder.indexOf(i);
+      if (place >= 0) {
+        var plc = document.createElement('span');
+        plc.style.cssText = 'font-size:9px;opacity:0.6;margin-left:3px;';
+        plc.textContent = '#' + (NUM_PLAYERS - place);
+        top.appendChild(plc);
+      }
+    }
     if (wins[i] > 0) {
       var w = document.createElement('span');
       w.style.cssText = 'font-size:9px;opacity:0.5;margin-left:2px;';
@@ -433,11 +770,18 @@ function updateCell(r, c) {
   el.className = 'cell';
   el.style.background = ''; el.style.boxShadow = '';
   if (owner >= 0 && dots > 0) {
-    el.style.background = COLORS[owner].dot;
-    el.style.boxShadow = '0 2px 0 ' + COLORS[owner].shadow;
+    el.style.background = PC(owner).dot;
+    el.style.boxShadow = '0 2px 0 ' + PC(owner).shadow;
   }
   el.innerHTML = '';
-  if (dots > 0) el.appendChild(buildDots(dots));
+  if (dots > 0) {
+    var dc = buildDots(dots);
+    if (owner >= 0) {
+      var allDots = dc.querySelectorAll('.dot');
+      for (var d = 0; d < allDots.length; d++) allDots[d].style.background = PC(owner).dotCol;
+    }
+    el.appendChild(dc);
+  }
 }
 
 function getCellCenter(r, c) {
@@ -449,12 +793,13 @@ function getCellCenter(r, c) {
   return { x: cR.left + cR.width / 2 - gR.left, y: cR.top + cR.height / 2 - gR.top };
 }
 
-function animateExplosion(fr, fc, tr, tc) {
+function animateExplosion(fr, fc, tr, tc, dotCol) {
   var grid = document.getElementById('grid');
   var from = getCellCenter(fr, fc);
   var to = getCellCenter(tr, tc);
   var dot = document.createElement('div');
   dot.className = 'flying-dot';
+  if (dotCol) dot.style.background = dotCol;
   var hs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dot-size')) || 16;
   dot.style.left = (from.x - hs / 2) + 'px';
   dot.style.top = (from.y - hs / 2) + 'px';
@@ -548,7 +893,7 @@ function processExplosions(done) {
     board[r][c].dots -= neighbors.length;
     if (board[r][c].dots <= 0) { board[r][c].dots = 0; board[r][c].owner = -1; }
     for (var j = 0; j < neighbors.length; j++) {
-      animateExplosion(r, c, neighbors[j][0], neighbors[j][1]);
+      animateExplosion(r, c, neighbors[j][0], neighbors[j][1], PC(owner).dotCol);
       board[neighbors[j][0]][neighbors[j][1]].owner = owner;
       board[neighbors[j][0]][neighbors[j][1]].dots++;
     }
@@ -565,9 +910,18 @@ function processExplosions(done) {
 function checkWin() {
   if (!allPlaced()) return false;
   var counts = getCounts();
+  var prevAlive = alive.slice();
   for (var i = 0; i < NUM_PLAYERS; i++) {
     if (placed[i] && counts[i] === 0) alive[i] = false;
   }
+  // Track elimination order and show death
+  for (var i = 0; i < NUM_PLAYERS; i++) {
+    if (prevAlive[i] && !alive[i]) {
+      elimOrder.push(i);
+      if (!isAI(i)) showDeath(i);
+    }
+  }
+  renderSideLB(); renderPlayerBar();
   var aliveCount = 0, winner = -1;
   for (var i = 0; i < NUM_PLAYERS; i++) {
     if (alive[i]) { aliveCount++; winner = i; }
@@ -580,8 +934,21 @@ function showWin(p) {
   animating = false;
   wins[p]++;
   var title = document.getElementById('win-title');
-  title.textContent = COLORS[p].name + ' wins!';
-  title.style.color = COLORS[p].dot;
+  title.textContent = PN(p) + ' wins!';
+  title.style.color = PC(p).dot;
+  // Build leaderboard
+  var sub = document.querySelector('.win-sub');
+  var lb = '<div style="text-align:left;font-size:12px;margin:0.5rem 0;">';
+  lb += '<div style="font-weight:700;margin-bottom:4px;">Leaderboard</div>';
+  lb += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><span style="font-weight:700;">🥇</span><span style="width:8px;height:8px;border-radius:50%;background:'+PC(p).dot+';display:inline-block;"></span> ' + PN(p) + '</div>';
+  for (var e = elimOrder.length - 1; e >= 0; e--) {
+    var pi = elimOrder[e];
+    var rank = NUM_PLAYERS - e;
+    var medal = rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
+    lb += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><span style="font-weight:700;min-width:20px;">' + medal + '</span><span style="width:8px;height:8px;border-radius:50%;background:'+PC(pi).dot+';display:inline-block;"></span> ' + PN(pi) + '</div>';
+  }
+  lb += '</div>';
+  sub.innerHTML = lb;
   document.getElementById('overlay').style.display = 'flex';
   renderPlayerBar();
 }
@@ -596,15 +963,55 @@ function updateUI() {
   }
   var label = document.getElementById('turn-label');
   if (!placed[turn]) {
-    label.textContent = COLORS[turn].name + (isAI(turn) ? ' (AI) placing…' : ' — place your first square');
+    label.textContent = PN(turn) + (isAI(turn) ? ' (AI) placing…' : ' — place your first square');
   } else {
-    label.textContent = COLORS[turn].name + (isAI(turn) ? ' (AI) thinking…' : "'s turn");
+    label.textContent = PN(turn) + (isAI(turn) ? ' (AI) thinking…' : "'s turn");
   }
 }
 
 wins = [];
-for (var i = 0; i < 20; i++) wins.push(0);
+for (var i = 0; i < COLORS.length; i++) wins.push(0);
+defaultColorMap();
 buildPlayerButtons(); buildAIButtons(); buildSizeButtons(); resetGame();
+
+// ======== DEATH SCREEN ========
+function showDeath(playerIdx) {
+  var panel = document.getElementById('death-panel');
+  var title = document.getElementById('death-title');
+  var sub = document.getElementById('death-sub');
+  title.textContent = PN(playerIdx) + ' eliminated!';
+  title.style.color = PC(playerIdx).dot;
+  if (gameMode === 'online' && playerIdx === mySlot) {
+    sub.textContent = 'All your squares were captured';
+  } else if (gameMode === 'local') {
+    sub.textContent = PN(playerIdx) + ' lost all their squares';
+  } else {
+    sub.textContent = 'All their squares were captured';
+  }
+  panel.style.display = '';
+}
+
+function dismissDeath() {
+  document.getElementById('death-panel').style.display = 'none';
+}
+
+function copyCode() {
+  var code = roomCode || document.getElementById('ol-lob-code').textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(code).then(function() {
+      var btn = document.getElementById('copy-btn');
+      btn.textContent = '✓ Copied!';
+      setTimeout(function() { btn.textContent = '📋 Copy code'; }, 1500);
+    });
+  } else {
+    var ta = document.createElement('textarea'); ta.value = code;
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    var btn = document.getElementById('copy-btn');
+    btn.textContent = '✓ Copied!';
+    setTimeout(function() { btn.textContent = '📋 Copy code'; }, 1500);
+  }
+}
 
 // ======== ONLINE GAME (layered on top) ========
 var ABLY_KEY = 'XAfEQA.obgo3w:S3vaSSyobeh_Kkt5JDZtkFN7Y3C8nMxwJHeC0Kcf4FY';
@@ -614,14 +1021,14 @@ var olAIs = 0, olHumans = 2, olSize = 5;
 var moveQueue = [], processing = false;
 
 function showOLPanel(id) {
-  ['ol-menu','ol-create','ol-join','ol-lobby'].forEach(function(p) {
+  ['ol-menu','ol-create','ol-join','ol-lobby','ol-help'].forEach(function(p) {
     var el = document.getElementById(p); if (el) el.style.display = 'none';
   });
   var el = document.getElementById(id); if (el) el.style.display = '';
   if (id === 'ol-create') buildOLCreateBtns();
 }
 function hideOLPanels() {
-  ['ol-menu','ol-create','ol-join','ol-lobby'].forEach(function(p) {
+  ['ol-menu','ol-create','ol-join','ol-lobby','ol-help'].forEach(function(p) {
     var el = document.getElementById(p); if (el) el.style.display = 'none';
   });
 }
@@ -733,19 +1140,28 @@ function olStartGame() {
 function onOLStart(msg) {
   var d = msg.data;
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
+  NUM_HUMANS = NUM_PLAYERS - NUM_AIS;
   mySlot = -1;
   for (var i = 0; i < d.slotMap.length; i++) if (d.slotMap[i].clientId === myClientId) { mySlot = d.slotMap[i].slot; break; }
-  wins = []; for (var i = 0; i < 20; i++) wins.push(0);
+  wins = []; for (var i = 0; i < COLORS.length; i++) wins.push(0);
+  defaultColorMap();
+  // Set player names from slot map
+  playerNames = [];
+  for (var i = 0; i < d.numPlayers; i++) {
+    if (i < d.slotMap.length) playerNames.push(d.slotMap[i].name);
+    else playerNames.push('AI ' + (i - d.slotMap.length + 1));
+  }
   hideOLPanels();
   document.getElementById('online-info').style.display = '';
-  document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + COLORS[mySlot].name + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
-  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); updateUI();
+  document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   olScheduleAI();
 }
 
 function onOLNewGame() {
   document.getElementById('overlay').style.display = 'none';
-  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); updateUI();
+  document.getElementById('death-panel').style.display = 'none';
+  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   moveQueue = []; processing = false;
   olScheduleAI();
 }
@@ -813,7 +1229,16 @@ function olDoAI() {
 function olCheckWin() {
   if (!allPlaced()) return false;
   var counts = getCounts();
+  var prevAlive = alive.slice();
   for (var i = 0; i < NUM_PLAYERS; i++) if (placed[i] && counts[i] === 0) alive[i] = false;
+  // Track elimination and show death
+  for (var i = 0; i < NUM_PLAYERS; i++) {
+    if (prevAlive[i] && !alive[i]) {
+      elimOrder.push(i);
+      if (mySlot >= 0 && i === mySlot) showDeath(i);
+    }
+  }
+  renderSideLB(); renderPlayerBar();
   var aliveCount = 0, winner = -1;
   for (var i = 0; i < NUM_PLAYERS; i++) if (alive[i]) { aliveCount++; winner = i; }
   if (aliveCount === 1) { olShowWin(winner); return true; }
@@ -822,8 +1247,21 @@ function olCheckWin() {
 
 function olShowWin(p) {
   animating = false; wins[p]++;
-  document.getElementById('win-title').textContent = COLORS[p].name + ' wins!';
-  document.getElementById('win-title').style.color = COLORS[p].dot;
+  document.getElementById('win-title').textContent = PN(p) + ' wins!';
+  document.getElementById('win-title').style.color = PC(p).dot;
+  // Leaderboard
+  var sub = document.querySelector('.win-sub');
+  var lb = '<div style="text-align:left;font-size:12px;margin:0.5rem 0;">';
+  lb += '<div style="font-weight:700;margin-bottom:4px;">Leaderboard</div>';
+  lb += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><span style="font-weight:700;">🥇</span><span style="width:8px;height:8px;border-radius:50%;background:'+PC(p).dot+';display:inline-block;"></span> ' + PN(p) + '</div>';
+  for (var e = elimOrder.length - 1; e >= 0; e--) {
+    var pi = elimOrder[e];
+    var rank = NUM_PLAYERS - e;
+    var medal = rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
+    lb += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><span style="font-weight:700;min-width:20px;">' + medal + '</span><span style="width:8px;height:8px;border-radius:50%;background:'+PC(pi).dot+';display:inline-block;"></span> ' + PN(pi) + '</div>';
+  }
+  lb += '</div>';
+  sub.innerHTML = lb;
   // Replace the play again button
   var ov = document.getElementById('overlay');
   var card = ov.querySelector('.win-card');
@@ -831,6 +1269,8 @@ function olShowWin(p) {
   if (isHost) {
     oldBtn.textContent = 'Play again';
     oldBtn.onclick = function() { channel.publish('newgame', {}); };
+    oldBtn.style.opacity = '';
+    oldBtn.style.cursor = '';
   } else {
     oldBtn.textContent = 'Waiting for host…';
     oldBtn.onclick = null;
@@ -899,13 +1339,13 @@ function updateOLUI() {
   var label = document.getElementById('turn-label');
   var isMine = turn === mySlot;
   if (!placed[turn]) {
-    if (isAI(turn)) label.textContent = COLORS[turn].name + ' (AI) placing…';
+    if (isAI(turn)) label.textContent = PN(turn) + ' (AI) placing…';
     else if (isMine) label.textContent = 'Your turn — place your first square';
-    else label.textContent = COLORS[turn].name + "'s turn — placing…";
+    else label.textContent = PN(turn) + "'s turn — placing…";
   } else {
-    if (isAI(turn)) label.textContent = COLORS[turn].name + ' (AI) thinking…';
+    if (isAI(turn)) label.textContent = PN(turn) + ' (AI) thinking…';
     else if (isMine) label.textContent = 'Your turn';
-    else label.textContent = COLORS[turn].name + "'s turn";
+    else label.textContent = PN(turn) + "'s turn";
   }
 }
 </script>
@@ -951,6 +1391,9 @@ function updateOLUI() {
   <div class="ol-card">
     <h2>Room</h2>
     <div class="ol-code" id="ol-lob-code"></div>
+    <div style="margin-top:0.3rem;">
+      <button class="mbtn secondary" onclick="copyCode()" id="copy-btn" style="font-size:12px;padding:6px 16px;">📋 Copy code</button>
+    </div>
     <div class="ol-info">Share this code with friends</div>
     <div class="ol-players" id="ol-lob-list"></div>
     <div class="ol-info" id="ol-lob-info"></div>
@@ -959,6 +1402,24 @@ function updateOLUI() {
     </div>
     <div id="ol-lob-guest" style="display:none;">
       <div class="ol-info" style="margin-top:0.8rem;">Waiting for host to start…</div>
+    </div>
+  </div>
+</div>
+
+<div class="ol-panel" id="ol-help" style="display:none;">
+  <div class="ol-card" style="text-align:left;max-width:440px;">
+    <h2 style="text-align:center;">How to play</h2>
+    <div style="font-size:13px;line-height:1.6;color:#5a4a3a;">
+      <p style="margin-bottom:0.6rem;"><strong>First move</strong> — click any empty square to claim it. It starts with 3 dots.</p>
+      <p style="margin-bottom:0.6rem;"><strong>Each turn</strong> — click one of your own squares to add 1 dot.</p>
+      <p style="margin-bottom:0.6rem;"><strong>Explosions</strong> — when a square reaches 4 dots, it explodes! It sends one dot to each neighbouring square (up, down, left, right). Dots only go where neighbours exist — nothing falls off the board.</p>
+      <p style="margin-bottom:0.6rem;"><strong>Capturing</strong> — when your dot lands on an opponent's square, you take it over. All the dots become yours.</p>
+      <p style="margin-bottom:0.6rem;"><strong>Chain reactions</strong> — if a captured square now has 4+ dots, it explodes too. This can cascade across the whole board in one turn!</p>
+      <p style="margin-bottom:0.6rem;"><strong>Elimination</strong> — lose all your squares and you're out.</p>
+      <p style="margin-bottom:0.8rem;"><strong>Winning</strong> — last player standing wins.</p>
+    </div>
+    <div style="text-align:center;">
+      <button class="mbtn primary" onclick="hideOLPanels()">Got it</button>
     </div>
   </div>
 </div>
