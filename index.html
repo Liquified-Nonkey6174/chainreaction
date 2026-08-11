@@ -316,27 +316,80 @@
 
 <script>
 var COLORS = [
+  // Reds
   { name:'Red',       dot:'#ef7b7b', shadow:'#c45a5a', dotCol:'#fff' },
-  { name:'Blue',      dot:'#5cc8d8', shadow:'#3a9aaa', dotCol:'#fff' },
-  { name:'Green',     dot:'#6ecf6e', shadow:'#4aa64a', dotCol:'#fff' },
-  { name:'Purple',    dot:'#b07ed8', shadow:'#8a5cb0', dotCol:'#fff' },
-  { name:'Amber',     dot:'#e8b84c', shadow:'#c49530', dotCol:'#fff' },
-  { name:'Pink',      dot:'#e87ea8', shadow:'#c05a88', dotCol:'#fff' },
-  { name:'Teal',      dot:'#4db6ac', shadow:'#2e8b82', dotCol:'#fff' },
-  { name:'Orange',    dot:'#f0944d', shadow:'#c47030', dotCol:'#fff' },
-  { name:'Indigo',    dot:'#7986cb', shadow:'#5460a0', dotCol:'#fff' },
-  { name:'Lime',      dot:'#aed55e', shadow:'#88aa3a', dotCol:'#fff' },
   { name:'Crimson',   dot:'#e05555', shadow:'#b83030', dotCol:'#fff' },
-  { name:'Sky',       dot:'#64b5f6', shadow:'#3888cc', dotCol:'#fff' },
-  { name:'Mint',      dot:'#66d9a0', shadow:'#40b07a', dotCol:'#fff' },
-  { name:'Plum',      dot:'#ce93d8', shadow:'#a06aae', dotCol:'#fff' },
-  { name:'Gold',      dot:'#ffd54f', shadow:'#ccaa28', dotCol:'#fff' },
   { name:'Coral',     dot:'#ff8a80', shadow:'#d06058', dotCol:'#fff' },
-  { name:'Cyan',      dot:'#4dd0e1', shadow:'#28a8b8', dotCol:'#fff' },
+  { name:'Salmon',    dot:'#e88070', shadow:'#c06050', dotCol:'#fff' },
+  // Red-Orange
+  { name:'Brick',     dot:'#c0654a', shadow:'#964830', dotCol:'#fff' },
+  { name:'Rust',      dot:'#b85830', shadow:'#904020', dotCol:'#fff' },
+  { name:'Clay',      dot:'#b88068', shadow:'#986048', dotCol:'#fff' },
+  // Orange
+  { name:'Peach',     dot:'#f0b088', shadow:'#cc8a60', dotCol:'#fff' },
+  { name:'Copper',    dot:'#c08050', shadow:'#986038', dotCol:'#fff' },
+  { name:'Orange',    dot:'#f0944d', shadow:'#c47030', dotCol:'#fff' },
+  { name:'Apricot',   dot:'#e8a060', shadow:'#c08040', dotCol:'#fff' },
+  { name:'Tan',       dot:'#c8a880', shadow:'#a88860', dotCol:'#fff' },
+  // Yellow
+  { name:'Amber',     dot:'#e8b84c', shadow:'#c49530', dotCol:'#fff' },
+  { name:'Mustard',   dot:'#c8a030', shadow:'#a08020', dotCol:'#fff' },
+  { name:'Gold',      dot:'#ffd54f', shadow:'#ccaa28', dotCol:'#fff' },
+  { name:'Honey',     dot:'#e0c050', shadow:'#b89830', dotCol:'#fff' },
+  { name:'Lemon',     dot:'#e8e050', shadow:'#c0b830', dotCol:'#333' },
+  // Yellow-Green
   { name:'Olive',     dot:'#a0b860', shadow:'#7a9038', dotCol:'#fff' },
+  { name:'Lime',      dot:'#aed55e', shadow:'#88aa3a', dotCol:'#fff' },
+  { name:'Avocado',   dot:'#7a9840', shadow:'#5a7828', dotCol:'#fff' },
+  { name:'Moss',      dot:'#6a9050', shadow:'#507038', dotCol:'#fff' },
+  // Green
+  { name:'Green',     dot:'#6ecf6e', shadow:'#4aa64a', dotCol:'#fff' },
+  { name:'Fern',      dot:'#58a058', shadow:'#408040', dotCol:'#fff' },
+  { name:'Sage',      dot:'#88aa88', shadow:'#668866', dotCol:'#fff' },
+  { name:'Forest',    dot:'#3a8a4a', shadow:'#286a34', dotCol:'#fff' },
+  { name:'Emerald',   dot:'#40b070', shadow:'#288850', dotCol:'#fff' },
+  { name:'Jade',      dot:'#50a878', shadow:'#388858', dotCol:'#fff' },
+  { name:'Mint',      dot:'#66d9a0', shadow:'#40b07a', dotCol:'#fff' },
+  { name:'Pine',      dot:'#308060', shadow:'#206040', dotCol:'#fff' },
+  // Teal-Cyan
+  { name:'Turquoise', dot:'#40c0b0', shadow:'#289880', dotCol:'#fff' },
+  { name:'Teal',      dot:'#4db6ac', shadow:'#2e8b82', dotCol:'#fff' },
+  { name:'Aqua',      dot:'#30b8b8', shadow:'#208888', dotCol:'#fff' },
+  { name:'Cyan',      dot:'#4dd0e1', shadow:'#28a8b8', dotCol:'#fff' },
+  { name:'Blue',      dot:'#5cc8d8', shadow:'#3a9aaa', dotCol:'#fff' },
+  // Blue
+  { name:'Ice',       dot:'#a0d0e0', shadow:'#78b0c8', dotCol:'#333' },
+  { name:'Powder',    dot:'#88b8d8', shadow:'#6898b8', dotCol:'#fff' },
+  { name:'Sky',       dot:'#64b5f6', shadow:'#3888cc', dotCol:'#fff' },
+  { name:'Steel',     dot:'#6888a8', shadow:'#486888', dotCol:'#fff' },
+  { name:'Denim',     dot:'#5078a8', shadow:'#385888', dotCol:'#fff' },
+  { name:'Navy',      dot:'#3a5a9c', shadow:'#283e6e', dotCol:'#fff' },
+  { name:'Cobalt',    dot:'#4466cc', shadow:'#3050a0', dotCol:'#fff' },
+  { name:'Midnight',  dot:'#303860', shadow:'#202848', dotCol:'#fff' },
+  // Indigo-Purple
+  { name:'Indigo',    dot:'#7986cb', shadow:'#5460a0', dotCol:'#fff' },
+  { name:'Periwinkle',dot:'#8888d8', shadow:'#6868b0', dotCol:'#fff' },
+  { name:'Lavender',  dot:'#b0a0d0', shadow:'#9080b0', dotCol:'#fff' },
+  { name:'Violet',    dot:'#9055c8', shadow:'#6a3a9a', dotCol:'#fff' },
+  { name:'Purple',    dot:'#b07ed8', shadow:'#8a5cb0', dotCol:'#fff' },
+  { name:'Lilac',     dot:'#c8a0d8', shadow:'#a880b8', dotCol:'#fff' },
+  { name:'Plum',      dot:'#ce93d8', shadow:'#a06aae', dotCol:'#fff' },
+  // Pink-Magenta
+  { name:'Orchid',    dot:'#c870b0', shadow:'#a05090', dotCol:'#fff' },
+  { name:'Mauve',     dot:'#b888a8', shadow:'#986888', dotCol:'#fff' },
+  { name:'Berry',     dot:'#884070', shadow:'#683058', dotCol:'#fff' },
+  { name:'Magenta',   dot:'#d44a8a', shadow:'#a83068', dotCol:'#fff' },
+  { name:'Pink',      dot:'#e87ea8', shadow:'#c05a88', dotCol:'#fff' },
+  { name:'Wine',      dot:'#883050', shadow:'#682038', dotCol:'#fff' },
   { name:'Rose',      dot:'#f48fb1', shadow:'#cc6688', dotCol:'#fff' },
-  { name:'Slate',     dot:'#90a4ae', shadow:'#607d8b', dotCol:'#fff' },
+  { name:'Flamingo',  dot:'#e8708a', shadow:'#c05068', dotCol:'#fff' },
+  { name:'Ruby',      dot:'#c83050', shadow:'#a02038', dotCol:'#fff' },
+  // Neutrals
   { name:'White',     dot:'#f0ece6', shadow:'#c8c4be', dotCol:'#333' },
+  { name:'Arctic',    dot:'#c0e0e8', shadow:'#98c0c8', dotCol:'#333' },
+  { name:'Slate',     dot:'#90a4ae', shadow:'#607d8b', dotCol:'#fff' },
+  { name:'Storm',     dot:'#708090', shadow:'#506070', dotCol:'#fff' },
+  { name:'Charcoal',  dot:'#505050', shadow:'#333',    dotCol:'#fff' },
   { name:'Black',     dot:'#2a2a2a', shadow:'#111',    dotCol:'#fff' },
 ];
 
@@ -352,7 +405,7 @@ var SIZES = [3, 5, 8, 10, 12, 15, 20, 30];
 var board, turn, animating;
 var placed, alive, wins;
 
-function maxPlayers() { return Math.min(20, SIZE * SIZE); }
+function maxPlayers() { return Math.min(64, SIZE * SIZE); }
 
 function buildPlayerButtons() {
   var c = document.getElementById('player-btns'); c.innerHTML = '';
