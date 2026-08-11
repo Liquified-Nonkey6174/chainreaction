@@ -348,13 +348,17 @@ function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
 function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
 
 var SIZE = 5, NUM_HUMANS = 1, NUM_AIS = 1, NUM_PLAYERS = 2;
-var SIZES = [5, 8, 10, 12, 15, 20, 30];
+var SIZES = [3, 5, 8, 10, 12, 15, 20, 30];
 var board, turn, animating;
 var placed, alive, wins;
 
+function maxPlayers() { return Math.min(20, SIZE * SIZE); }
+
 function buildPlayerButtons() {
   var c = document.getElementById('player-btns'); c.innerHTML = '';
-  var max = 20 - NUM_AIS;
+  var mp = maxPlayers();
+  var max = mp - NUM_AIS;
+  if (NUM_HUMANS > max) { NUM_HUMANS = max; NUM_PLAYERS = NUM_HUMANS + NUM_AIS; }
   for (var i = 0; i <= max; i++) {
     var b = document.createElement('button');
     b.className = 'btn' + (i === NUM_HUMANS ? ' active' : '');
@@ -372,7 +376,9 @@ function buildPlayerButtons() {
 
 function buildAIButtons() {
   var c = document.getElementById('ai-btns'); c.innerHTML = '';
-  var max = 20 - NUM_HUMANS;
+  var mp = maxPlayers();
+  var max = mp - NUM_HUMANS;
+  if (NUM_AIS > max) { NUM_AIS = max; NUM_PLAYERS = NUM_HUMANS + NUM_AIS; }
   for (var i = 0; i <= max; i++) {
     var b = document.createElement('button');
     b.className = 'btn' + (i === NUM_AIS ? ' active' : '');
@@ -397,7 +403,7 @@ function buildSizeButtons() {
     b.className = 'btn' + (s === SIZE ? ' active' : '');
     b.textContent = s + '×' + s;
     (function(n) {
-      b.onclick = function() { SIZE = n; buildSizeButtons(); initBoard(); applyCellSize(); renderGrid(); };
+      b.onclick = function() { SIZE = n; buildSizeButtons(); buildPlayerButtons(); buildAIButtons(); initBoard(); applyCellSize(); renderGrid(); };
     })(s);
     c.appendChild(b);
   }
@@ -627,7 +633,8 @@ function checkGameOver() {
 
 function applyCellSize() {
   var cs, ds, g;
-  if (SIZE <= 5) { cs = 56; ds = 16; g = 4; }
+  if (SIZE <= 3) { cs = 70; ds = 18; g = 5; }
+  else if (SIZE <= 5) { cs = 56; ds = 16; g = 4; }
   else if (SIZE <= 8) { cs = 48; ds = 14; g = 4; }
   else if (SIZE <= 10) { cs = 44; ds = 13; g = 3; }
   else if (SIZE <= 12) { cs = 40; ds = 12; g = 3; }
