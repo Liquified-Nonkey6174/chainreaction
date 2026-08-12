@@ -179,6 +179,17 @@
   .ol-players div { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; font-weight: 500; }
   .ol-players .lpip { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
 
+  .pub-room {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px; margin-bottom: 4px; border-radius: 10px;
+    background: #f8f4f0; cursor: pointer; transition: background 0.15s;
+  }
+  .pub-room:hover { background: #f0ebe4; }
+  .pub-room-info { font-size: 12px; }
+  .pub-room-host { font-weight: 600; }
+  .pub-room-details { font-size: 11px; color: #999; margin-top: 1px; }
+  .pub-room-code { font-size: 11px; font-weight: 700; color: var(--bg); letter-spacing: 0.05em; }
+
   /* DEATH OVERLAY */
   .death-panel {
     position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 45;
@@ -281,7 +292,7 @@
       <div class="win-card">
         <div class="win-title" id="win-title"></div>
         <div class="win-sub">All opponents eliminated</div>
-        <button class="btn" onclick="skipColourPicker=true;resetGame()">Play again</button>
+        <button class="btn" id="play-again-btn">Play again</button>
       </div>
     </div>
   </div>
@@ -1014,6 +1025,11 @@ function showWin(p) {
   }
   lb += '</div>';
   sub.innerHTML = lb;
+  var paBtn = document.getElementById('play-again-btn');
+  paBtn.textContent = 'Play again';
+  paBtn.style.opacity = '';
+  paBtn.style.cursor = '';
+  paBtn.onclick = function() { skipColourPicker = true; resetGame(); };
   document.getElementById('overlay').style.display = 'flex';
   renderPlayerBar();
 }
@@ -1083,6 +1099,8 @@ var ABLY_KEY = 'XAfEQA.obgo3w:S3vaSSyobeh_Kkt5JDZtkFN7Y3C8nMxwJHeC0Kcf4FY';
 var ably, channel, roomCode, myClientId, myName, isHost;
 var onlinePlayers = [], mySlot = -1, gameMode = 'local';
 var olAIs = 0, olHumans = 2, olSize = 5;
+var olVisibility = 'public';
+var lobbyChannel = null;
 var moveQueue = [], processing = false;
 
 function showOLPanel(id) {
@@ -1091,10 +1109,90 @@ function showOLPanel(id) {
   });
   var el = document.getElementById(id); if (el) el.style.display = '';
   if (id === 'ol-create') buildOLCreateBtns();
+  if (id === 'ol-join') olLoadPublicRooms();
 }
 function hideOLPanels() {
   ['ol-menu','ol-create','ol-join','ol-lobby','ol-help','ol-colours'].forEach(function(p) {
     var el = document.getElementById(p); if (el) el.style.display = 'none';
+  });
+}
+
+// ---- PUBLIC ROOM LOBBY ----
+function ensureLobbyAbly(cb) {
+  if (ably && ably.connection.state === 'connected') { cb(); return; }
+  if (!myClientId) myClientId = 'p_' + Math.random().toString(36).substr(2, 8);
+  ably = new Ably.Realtime({ key: ABLY_KEY, clientId: myClientId });
+  ably.connection.on('connected', function() { cb(); });
+}
+
+function olEnterLobby() {
+  if (olVisibility !== 'public') return;
+  ensureLobbyAbly(function() {
+    lobbyChannel = ably.channels.get('cr-public-lobby');
+    lobbyChannel.presence.enter({
+      roomCode: roomCode,
+      hostName: myName,
+      size: olSize,
+      humans: olHumans,
+      ais: olAIs,
+      playerCount: 1
+    });
+  });
+}
+
+function olUpdateLobbyPresence(count) {
+  if (!lobbyChannel || olVisibility !== 'public') return;
+  lobbyChannel.presence.update({
+    roomCode: roomCode,
+    hostName: myName,
+    size: olSize,
+    humans: olHumans,
+    ais: olAIs,
+    playerCount: count
+  });
+}
+
+function olLeaveLobbyChannel() {
+  if (lobbyChannel) {
+    try { lobbyChannel.presence.leave(); } catch(e) {}
+    lobbyChannel = null;
+  }
+}
+
+function olLoadPublicRooms() {
+  var list = document.getElementById('ol-public-list');
+  if (!list) return;
+  list.innerHTML = '<div style="font-size:12px;color:#ccc;font-style:italic;">Loading…</div>';
+  ensureLobbyAbly(function() {
+    var lc = ably.channels.get('cr-public-lobby');
+    lc.presence.get(function(err, members) {
+      if (err || !members || members.length === 0) {
+        list.innerHTML = '<div style="font-size:12px;color:#ccc;font-style:italic;">No public rooms available</div>';
+        return;
+      }
+      list.innerHTML = '';
+      for (var i = 0; i < members.length; i++) {
+        var d = members[i].data;
+        if (!d || !d.roomCode) continue;
+        var row = document.createElement('div');
+        row.className = 'pub-room';
+        row.innerHTML = '<div class="pub-room-info"><div class="pub-room-host">' + (d.hostName || 'Host') + '\'s room</div>' +
+          '<div class="pub-room-details">' + d.size + '×' + d.size + ' · ' + d.humans + ' human' + (d.humans !== 1 ? 's' : '') +
+          (d.ais > 0 ? ' + ' + d.ais + ' AI' : '') + ' · ' + (d.playerCount || 1) + ' joined</div></div>' +
+          '<div class="pub-room-code">' + d.roomCode + '</div>';
+        (function(code) {
+          row.onclick = function() {
+            document.getElementById('ol-join-code').value = code;
+          };
+        })(d.roomCode);
+        list.appendChild(row);
+      }
+      if (list.children.length === 0) {
+        list.innerHTML = '<div style="font-size:12px;color:#ccc;font-style:italic;">No public rooms available</div>';
+      }
+    });
+    // Also subscribe for live updates
+    lc.presence.subscribe(function() { olLoadPublicRooms(); });
   });
 }
 
@@ -1109,7 +1207,7 @@ function buildOLNumRow(containerId, min, max, current, cb) {
   var c = document.getElementById(containerId); if (!c) return; c.innerHTML = '';
   for (var i = min; i <= max; i++) {
     var b = document.createElement('button'); b.className = 'sbtn' + (i === current ? ' active' : ''); b.textContent = i;
-    (function(n) { b.onclick = function() { cb(n); var bs = this.parentNode.children; for (var j = 0; j < bs.length; j++) bs[j].className = 'sbtn'; this.className = 'sbtn active'; }; })(i);
+    (function(n) { b.onclick = function() { cb(n); }; })(i);
     c.appendChild(b);
   }
 }
@@ -1117,14 +1215,18 @@ function buildOLSizeRow(containerId, current, cb) {
   var c = document.getElementById(containerId); if (!c) return; c.innerHTML = '';
   SIZES.forEach(function(s) {
     var b = document.createElement('button'); b.className = 'sbtn' + (s === current ? ' active' : ''); b.textContent = s + '×' + s;
-    (function(n) { b.onclick = function() { cb(n); var bs = this.parentNode.children; for (var j = 0; j < bs.length; j++) bs[j].className = 'sbtn'; this.className = 'sbtn active'; }; })(s);
+    (function(n) { b.onclick = function() { cb(n); }; })(s);
     c.appendChild(b);
   });
 }
+function olMaxPlayers() { return Math.min(64, olSize * olSize); }
 function buildOLCreateBtns() {
-  buildOLNumRow('ol-c-humans', 1, 20, olHumans, function(n) { olHumans = n; if (olHumans + olAIs > 20) olAIs = 20 - olHumans; buildOLCreateBtns(); });
-  buildOLNumRow('ol-c-ais', 0, Math.min(20 - olHumans, 19), olAIs, function(n) { olAIs = n; });
-  buildOLSizeRow('ol-c-size', olSize, function(n) { olSize = n; });
+  var mp = olMaxPlayers();
+  if (olHumans + olAIs > mp) { olAIs = Math.max(0, mp - olHumans); if (olHumans > mp) olHumans = mp; }
+  if (olHumans + olAIs < 2) { if (olAIs < 1) olAIs = Math.min(1, mp - olHumans); }
+  buildOLNumRow('ol-c-humans', 0, mp, olHumans, function(n) { olHumans = n; if (olHumans + olAIs > olMaxPlayers()) olAIs = olMaxPlayers() - olHumans; if (olHumans + olAIs < 2 && olAIs < 1) olAIs = 1; buildOLCreateBtns(); });
+  buildOLNumRow('ol-c-ais', 0, mp - olHumans, olAIs, function(n) { olAIs = n; buildOLCreateBtns(); });
+  buildOLSizeRow('ol-c-size', olSize, function(n) { olSize = n; if (olHumans + olAIs > olMaxPlayers()) { olAIs = Math.max(0, olMaxPlayers() - olHumans); if (olHumans > olMaxPlayers()) olHumans = olMaxPlayers(); } buildOLCreateBtns(); });
 }
 
 function initAbly(cb) {
@@ -1145,6 +1247,7 @@ function olCreateRoom() {
     channel.subscribe('start', onOLStart);
     channel.subscribe('move', onOLMove);
     channel.subscribe('newgame', onOLNewGame);
+    olEnterLobby();
     showOLPanel('ol-lobby');
     document.getElementById('ol-lob-code').textContent = roomCode;
     document.getElementById('ol-lob-host').style.display = '';
@@ -1179,7 +1282,7 @@ function updateOLLobby() {
     var list = document.getElementById('ol-lob-list'); list.innerHTML = '';
     for (var i = 0; i < onlinePlayers.length; i++) {
       var div = document.createElement('div');
-      var pip = document.createElement('div'); pip.className = 'lpip'; pip.style.background = COLORS[i].dot;
+      var pip = document.createElement('div'); pip.className = 'lpip'; pip.style.background = COLORS[i % COLORS.length].dot;
       div.appendChild(pip);
       var txt = onlinePlayers[i].name;
       if (onlinePlayers[i].host) txt += ' (host)';
@@ -1193,6 +1296,7 @@ function updateOLLobby() {
       var btn = document.getElementById('ol-lob-start');
       if (total >= 2) { btn.textContent = 'Start (' + onlinePlayers.length + ' humans + ' + olAIs + ' AIs)'; btn.style.opacity = '1'; }
       else { btn.textContent = 'Need 2+ total players'; btn.style.opacity = '0.5'; }
+      olUpdateLobbyPresence(onlinePlayers.length);
     } else {
       document.getElementById('ol-lob-info').textContent = onlinePlayers.length + ' players in room';
     }
@@ -1369,6 +1473,7 @@ function olConfirmColours() {
 
 function onOLStart(msg) {
   var d = msg.data;
+  olLeaveLobbyChannel();
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
   NUM_HUMANS = NUM_PLAYERS - NUM_AIS;
   mySlot = -1;
@@ -1496,32 +1601,30 @@ function olShowWin(p) {
   }
   lb += '</div>';
   sub.innerHTML = lb;
-  // Replace the play again button
-  var ov = document.getElementById('overlay');
-  var card = ov.querySelector('.win-card');
-  var oldBtn = card.querySelector('.btn');
+  var paBtn = document.getElementById('play-again-btn');
   if (isHost) {
-    oldBtn.textContent = 'Play again';
-    oldBtn.onclick = function() { channel.publish('newgame', {}); };
-    oldBtn.style.opacity = '';
-    oldBtn.style.cursor = '';
+    paBtn.textContent = 'Play again';
+    paBtn.onclick = function() { channel.publish('newgame', {}); };
+    paBtn.style.opacity = '';
+    paBtn.style.cursor = '';
   } else {
-    oldBtn.textContent = 'Waiting for host…';
-    oldBtn.onclick = null;
-    oldBtn.style.opacity = '0.5';
-    oldBtn.style.cursor = 'default';
+    paBtn.textContent = 'Waiting for host…';
+    paBtn.onclick = null;
+    paBtn.style.opacity = '0.5';
+    paBtn.style.cursor = 'default';
   }
-  ov.style.display = 'flex';
+  document.getElementById('overlay').style.display = 'flex';
   renderPlayerBar();
 }
 
 function olLeave() {
+  olLeaveLobbyChannel();
   if (channel) { try { channel.presence.leave(); channel.detach(); } catch(e) {} channel = null; }
   gameMode = 'local'; mySlot = -1;
   document.getElementById('online-info').style.display = 'none';
   // Restore the play again button
-  var card = document.querySelector('.win-card .btn');
-  if (card) { card.textContent = 'Play again'; card.onclick = resetGame; card.style.opacity = ''; card.style.cursor = ''; }
+  var paBtn = document.getElementById('play-again-btn');
+  if (paBtn) { paBtn.textContent = 'Play again'; paBtn.onclick = function() { skipColourPicker = true; resetGame(); }; paBtn.style.opacity = ''; paBtn.style.cursor = ''; }
   resetGame();
 }
 
@@ -1603,6 +1706,10 @@ function updateOLUI() {
     <div class="ol-row"><span class="ol-label">Human slots:</span><div id="ol-c-humans"></div></div>
     <div class="ol-row"><span class="ol-label">AIs:</span><div id="ol-c-ais"></div></div>
     <div class="ol-row"><span class="ol-label">Grid:</span><div id="ol-c-size"></div></div>
+    <div class="ol-row"><span class="ol-label">Visibility:</span>
+      <button class="sbtn active" id="vis-public" onclick="olVisibility='public';document.getElementById('vis-public').className='sbtn active';document.getElementById('vis-private').className='sbtn';">Public</button>
+      <button class="sbtn" id="vis-private" onclick="olVisibility='private';document.getElementById('vis-private').className='sbtn active';document.getElementById('vis-public').className='sbtn';">Private</button>
+    </div>
     <div style="margin-top:0.6rem;">
       <button class="mbtn primary" onclick="olCreateRoom()">Create</button>
       <button class="mbtn secondary" onclick="showOLPanel('ol-menu')">Back</button>
@@ -1611,13 +1718,21 @@ function updateOLUI() {
 </div>
 
 <div class="ol-panel" id="ol-join" style="display:none;">
-  <div class="ol-card">
+  <div class="ol-card" style="max-width:460px;">
     <h2>Join a room</h2>
-    <input type="text" id="ol-join-code" placeholder="Room code" maxlength="6" style="text-transform:uppercase;">
-    <input type="text" id="ol-join-name" placeholder="Your name" maxlength="12">
-    <div style="margin-top:0.3rem;">
-      <button class="mbtn primary" onclick="olJoinRoom()">Join</button>
-      <button class="mbtn secondary" onclick="showOLPanel('ol-menu')">Back</button>
+    <div style="display:flex;gap:6px;margin-bottom:0.8rem;">
+      <input type="text" id="ol-join-code" placeholder="Enter code" maxlength="6" style="text-transform:uppercase;flex:1;">
+      <input type="text" id="ol-join-name" placeholder="Your name" maxlength="12" style="flex:1;">
+      <button class="mbtn primary" onclick="olJoinRoom()" style="padding:8px 14px;white-space:nowrap;">Join</button>
+    </div>
+    <div style="border-top:1px solid #eee;padding-top:0.6rem;">
+      <div style="font-size:12px;font-weight:600;color:#999;margin-bottom:0.4rem;">Public rooms</div>
+      <div id="ol-public-list" style="max-height:220px;overflow-y:auto;">
+        <div style="font-size:12px;color:#ccc;font-style:italic;">Loading…</div>
+      </div>
+    </div>
+    <div style="margin-top:0.6rem;">
+      <button class="mbtn secondary" onclick="olLeaveLobbyChannel();showOLPanel('ol-menu')">Back</button>
     </div>
   </div>
 </div>
