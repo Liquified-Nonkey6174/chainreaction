@@ -292,7 +292,7 @@
       <div class="win-card">
         <div class="win-title" id="win-title"></div>
         <div class="win-sub">All opponents eliminated</div>
-        <button class="btn" id="play-again-btn">Play again</button>
+        <button class="btn" id="play-again-btn" onclick="playAgain()">Play again</button>
       </div>
     </div>
   </div>
@@ -1029,7 +1029,7 @@ function showWin(p) {
   paBtn.textContent = 'Play again';
   paBtn.style.opacity = '';
   paBtn.style.cursor = '';
-  paBtn.onclick = function() { skipColourPicker = true; resetGame(); };
+  paBtn.style.display = '';
   document.getElementById('overlay').style.display = 'flex';
   renderPlayerBar();
 }
@@ -1074,6 +1074,18 @@ function showDeath(playerIdx) {
 
 function dismissDeath() {
   document.getElementById('death-panel').style.display = 'none';
+}
+
+function playAgain() {
+  if (gameMode === 'online') {
+    if (isHost) {
+      channel.publish('newgame', {});
+    }
+    // non-host can't trigger play again
+  } else {
+    skipColourPicker = true;
+    resetGame();
+  }
 }
 
 function copyCode() {
@@ -1604,12 +1616,11 @@ function olShowWin(p) {
   var paBtn = document.getElementById('play-again-btn');
   if (isHost) {
     paBtn.textContent = 'Play again';
-    paBtn.onclick = function() { channel.publish('newgame', {}); };
     paBtn.style.opacity = '';
     paBtn.style.cursor = '';
+    paBtn.style.display = '';
   } else {
     paBtn.textContent = 'Waiting for host…';
-    paBtn.onclick = null;
     paBtn.style.opacity = '0.5';
     paBtn.style.cursor = 'default';
   }
@@ -1624,7 +1635,7 @@ function olLeave() {
   document.getElementById('online-info').style.display = 'none';
   // Restore the play again button
   var paBtn = document.getElementById('play-again-btn');
-  if (paBtn) { paBtn.textContent = 'Play again'; paBtn.onclick = function() { skipColourPicker = true; resetGame(); }; paBtn.style.opacity = ''; paBtn.style.cursor = ''; }
+  if (paBtn) { paBtn.textContent = 'Play again'; paBtn.style.opacity = ''; paBtn.style.cursor = ''; }
   resetGame();
 }
 
