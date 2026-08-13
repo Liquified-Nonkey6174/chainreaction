@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chain Reaction</title>
 <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -83,11 +81,14 @@
   .side-lb-list { font-size: 12px; }
   .side-lb-empty { color: #bbb; font-size: 11px; font-style: italic; }
   .side-lb-row {
-    display: flex; align-items: center; gap: 6px; padding: 3px 0;
+    display: grid; grid-template-columns: auto 1fr auto auto;
+    align-items: center; gap: 6px; padding: 3px 0;
   }
   .side-lb-row .lb-rank { font-weight: 700; min-width: 20px; font-size: 11px; }
   .side-lb-row .lb-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .side-lb-row .lb-name { font-weight: 500; }
+  .side-lb-row .lb-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side-lb-row .lb-round { font-size: 10px; opacity: 0.5; white-space: nowrap; }
+  .side-lb-row .lb-killer { font-size: 10px; opacity: 0.5; white-space: nowrap; }
   .side-lb-row.lb-alive { opacity: 0.4; }
 
   @media (max-width: 700px) {
@@ -287,6 +288,17 @@
     text-underline-offset: 3px;
   }
   .main-menu .help-link:hover { opacity: 1; }
+  .main-pub-room {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; margin-bottom: 4px; border-radius: 10px;
+    background: rgba(255,255,255,0.15); cursor: pointer; transition: background 0.15s;
+    color: #fff;
+  }
+  .main-pub-room:hover { background: rgba(255,255,255,0.25); }
+  .main-pub-room .mpr-info { text-align: left; }
+  .main-pub-room .mpr-host { font-weight: 600; font-size: 13px; }
+  .main-pub-room .mpr-details { font-size: 11px; opacity: 0.6; margin-top: 1px; }
+  .main-pub-room .mpr-code { font-size: 11px; font-weight: 700; opacity: 0.8; letter-spacing: 0.05em; }
   .demo-wrap {
     margin-top: 1.5rem; display: flex; justify-content: center;
   }
@@ -312,62 +324,52 @@
 
   /* USERNAME BAR */
   .username-bar {
-    position: fixed; top: 0; right: 0; padding: 8px 14px;
-    font-size: 12px; display: flex; align-items: center; gap: 6px; z-index: 40;
+    position: fixed; top: 10px; right: 12px; padding: 6px 14px;
+    font-size: 13px; display: flex; align-items: center; gap: 8px; z-index: 40;
+    background: rgba(255,255,255,0.2); border-radius: 20px; backdrop-filter: blur(6px);
   }
   .username-bar input {
-    padding: 4px 8px; border-radius: 8px; border: 1.5px solid rgba(255,255,255,0.3);
-    background: rgba(255,255,255,0.15); color: #fff; font-size: 12px; width: 100px;
-    outline: none;
+    padding: 5px 10px; border-radius: 10px; border: 1.5px solid rgba(255,255,255,0.4);
+    background: rgba(255,255,255,0.15); color: #fff; font-size: 13px; width: 130px;
+    outline: none; font-weight: 500;
   }
-  .username-bar input:focus { border-color: rgba(255,255,255,0.6); }
+  .username-bar input::placeholder { color: rgba(255,255,255,0.5); }
+  .username-bar input:focus { border-color: #fff; background: rgba(255,255,255,0.25); }
   .username-bar .set-btn {
-    padding: 3px 10px; border-radius: 8px; border: none;
-    background: rgba(255,255,255,0.25); color: #fff; font-size: 11px;
-    font-weight: 600; cursor: pointer;
+    padding: 5px 12px; border-radius: 10px; border: none;
+    background: rgba(255,255,255,0.3); color: #fff; font-size: 12px;
+    font-weight: 600; cursor: pointer; transition: all 0.15s;
   }
-  .username-bar .set-btn:hover { background: rgba(255,255,255,0.4); }
-  .username-bar .uname-display { font-weight: 600; opacity: 0.8; }
+  .username-bar .set-btn:hover { background: rgba(255,255,255,0.5); }
+  .username-bar .uname-display { font-weight: 700; color: #fff; font-size: 14px; text-shadow: 0 1px 3px rgba(0,0,0,0.2); }
 
   /* CHAT */
-  .chat-toggle {
-    position: fixed; bottom: 16px; right: 16px; z-index: 41;
-    width: 48px; height: 48px; border-radius: 50%; border: none;
-    background: var(--ui-bg); color: var(--text-dark); font-size: 20px;
-    cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-    display: flex; align-items: center; justify-content: center;
+  .chat-section {
+    width: 100%; max-width: 500px; margin: 1.5rem auto 1rem;
   }
-  .chat-toggle:hover { transform: scale(1.05); }
-  .chat-badge {
-    position: absolute; top: -2px; right: -2px; width: 14px; height: 14px;
-    border-radius: 50%; background: #ef7b7b; display: none;
-  }
-
-  .chat-panel {
-    position: fixed; bottom: 76px; right: 16px; z-index: 41;
-    width: 320px; max-height: 400px; background: var(--ui-bg);
-    border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-    display: none; flex-direction: column; overflow: hidden;
+  .chat-card {
+    background: var(--ui-bg); border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12); overflow: hidden;
     color: var(--text-dark);
   }
-  .chat-panel.open { display: flex; }
   .chat-tabs {
     display: flex; border-bottom: 1px solid #eee;
   }
   .chat-tab {
     flex: 1; padding: 10px; text-align: center; font-size: 12px; font-weight: 600;
-    cursor: pointer; border: none; background: none; color: #999;
+    cursor: pointer; border: none; background: none; color: #999; transition: all 0.15s;
   }
   .chat-tab.active { color: var(--text-dark); border-bottom: 2px solid var(--bg); }
+  .chat-tab:hover { color: var(--text-dark); }
   .chat-messages {
-    flex: 1; overflow-y: auto; padding: 8px 12px; min-height: 200px; max-height: 300px;
+    overflow-y: auto; padding: 10px 14px; height: 220px;
   }
   .chat-msg { margin-bottom: 6px; font-size: 12px; line-height: 1.4; }
   .chat-msg .msg-name { font-weight: 700; }
   .chat-msg .msg-time { font-size: 10px; opacity: 0.4; margin-left: 4px; }
   .chat-msg .msg-text { margin-top: 1px; }
   .chat-input-row {
-    display: flex; gap: 4px; padding: 8px; border-top: 1px solid #eee;
+    display: flex; gap: 4px; padding: 8px 10px; border-top: 1px solid #eee;
   }
   .chat-input-row input {
     flex: 1; padding: 8px 10px; border-radius: 10px; border: 1.5px solid #ddd;
@@ -378,6 +380,7 @@
     padding: 8px 14px; border-radius: 10px; border: none;
     background: var(--bg); color: #fff; font-weight: 600; font-size: 13px; cursor: pointer;
   }
+  .chat-input-row button:hover { filter: brightness(1.1); }
 
   .spectator-badge {
     font-size: 10px; background: rgba(255,255,255,0.2); padding: 2px 8px;
@@ -385,7 +388,7 @@
   }
 
   @media (max-width: 600px) {
-    .chat-panel { width: calc(100vw - 32px); right: 16px; bottom: 72px; }
+
   }
 </style>
 </head>
@@ -396,18 +399,28 @@
   <h1>Chain Reaction</h1>
   <div class="main-menu-btns">
     <button class="main-btn btn-local" onclick="showLocalScreen()">Local</button>
-    <button class="main-btn btn-online" onclick="showOLPanel('ol-menu')">Online</button>
     <button class="main-btn btn-playground" onclick="showPlayground()">Playground</button>
+  </div>
+  <div class="main-menu-btns" style="margin-top:0;">
+    <button class="main-btn btn-online" onclick="showOLPanel('ol-create')">Create Room</button>
+    <button class="main-btn btn-online" onclick="showOLPanel('ol-join')" style="background:#4db6ac;">Join Room</button>
   </div>
   <button class="help-link" onclick="showOLPanel('ol-help')">How to play</button>
   <div class="demo-wrap">
     <div class="demo-grid" id="demo-grid" style="grid-template-columns:repeat(5,44px);"></div>
   </div>
+  <div id="main-public-rooms" style="margin-top:1rem;max-width:400px;width:100%;margin-left:auto;margin-right:auto;">
+    <div style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.7);margin-bottom:0.4rem;">Public Rooms</div>
+    <div id="main-pub-list" style="font-size:12px;color:rgba(255,255,255,0.5);font-style:italic;">Loading…</div>
+  </div>
 </div>
 
 <!-- LOCAL SCREEN -->
 <div id="local-screen" style="display:none;">
-<h1>Chain reaction</h1>
+
+<button class="btn" onclick="goMainMenu()" style="position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;">← Menu</button>
+
+<h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-style:italic;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Chain Reaction</h1>
 
 <div class="row">
   <span class="label">Humans:</span>
@@ -420,8 +433,10 @@
 <div class="row">
   <span class="label">Grid:</span>
   <div id="size-btns" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
-  <button class="btn" onclick="resetGame()" style="margin-left:6px;">Start game</button>
-  <button class="btn" onclick="goMainMenu()" style="margin-left:2px;">Menu</button>
+</div>
+
+<div class="row" style="margin-top:0.3rem;">
+  <button class="btn" onclick="resetGame()" style="padding:10px 28px;font-size:14px;font-weight:700;background:rgba(255,255,255,0.35);">Start game</button>
 </div>
 
 <div class="online-info" id="online-info" style="display:none;"></div>
@@ -474,6 +489,15 @@
   </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script>
+// Firebase fallback check
+if (typeof firebase === 'undefined') {
+  window.firebase = null;
+  console.warn('Firebase SDK failed to load - chat features disabled');
+}
+</script>
 <script>
 var COLORS = [
   // Reds
@@ -561,6 +585,7 @@ var killCounts = []; // kills per player
 var roundNum = 0;
 var moveNum = 0;
 var playgroundMode = false;
+var gameGeneration = 0;
 function PC(i) { var ci = colorMap[i]; return ci >= 0 ? COLORS[ci] : { name:'?', dot:'#999', shadow:'#666', dotCol:'#fff' }; }
 function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
 function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
@@ -635,8 +660,9 @@ function initBoard() {
   }
   turn = 0;
   placed = []; alive = []; elimOrder = []; elimInfo = {}; killCounts = [];
-  roundNum = 1; moveNum = 0;  for (var i = 0; i < NUM_PLAYERS; i++) { placed.push(false); alive.push(true); killCounts.push(0); }
+  roundNum = 0; moveNum = 0;  for (var i = 0; i < NUM_PLAYERS; i++) { placed.push(false); alive.push(true); killCounts.push(0); }
   animating = false;
+  gameGeneration++;
 }
 
 function isAI(p) { return p >= NUM_HUMANS; }
@@ -663,8 +689,8 @@ var skipColourPicker = false;
 
 function resetGame() {
   playgroundMode = false;
-  document.getElementById('overlay').style.display = 'none';
-  document.getElementById('death-panel').style.display = 'none';
+  var ov = document.getElementById('overlay'); if (ov) ov.style.display = 'none';
+  var dp = document.getElementById('death-panel'); if (dp) dp.style.display = 'none';
   if (!wins) wins = [];
   while (wins.length < COLORS.length) wins.push(0);
   if (gameMode === 'local' && !skipColourPicker) {
@@ -712,6 +738,17 @@ function renderColourPicker() {
   for (var p = 0; p < NUM_HUMANS; p++) {
     var row = document.createElement('div');
     row.className = 'cp-player';
+
+    // Colour preview pip
+    var preview = document.createElement('div');
+    preview.style.cssText = 'width:24px;height:24px;border-radius:50%;flex-shrink:0;border:2px solid #ddd;transition:all 0.15s;';
+    if (colorMap[p] >= 0) {
+      preview.style.background = COLORS[colorMap[p]].dot;
+      preview.style.borderColor = COLORS[colorMap[p]].dot;
+    } else {
+      preview.style.background = '#eee';
+    }
+    row.appendChild(preview);
 
     // Name input
     var nameInp = document.createElement('input');
@@ -834,13 +871,37 @@ function renderSideLB() {
       var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
       var row = document.createElement('div');
       row.className = 'side-lb-row';
-      var detailText = '';
-      if (info) {
-        if (info.isWinner) detailText = 'Winner!';
-        else { detailText = 'R' + info.round; if (info.killedBy >= 0 && info.killedBy !== pi) detailText += ', by ' + PN(info.killedBy); }
-      }
-      row.innerHTML = '<span class="lb-rank">' + medal + '</span><span class="lb-pip" style="background:'+PC(pi).dot+'"></span><span class="lb-name">' + PN(pi) + '</span>' +
-        (detailText ? '<span style="font-size:9px;opacity:0.5;margin-left:auto;">' + detailText + '</span>' : '');
+
+      var rankEl = document.createElement('span');
+      rankEl.className = 'lb-rank';
+      rankEl.textContent = medal;
+      row.appendChild(rankEl);
+
+      var nameWrap = document.createElement('span');
+      nameWrap.style.cssText = 'display:flex;align-items:center;gap:4px;overflow:hidden;';
+      var pip = document.createElement('span');
+      pip.className = 'lb-pip';
+      pip.style.background = PC(pi).dot;
+      nameWrap.appendChild(pip);
+      var nm = document.createElement('span');
+      nm.className = 'lb-name';
+      nm.textContent = PN(pi);
+      nameWrap.appendChild(nm);
+      row.appendChild(nameWrap);
+
+      var roundEl = document.createElement('span');
+      roundEl.className = 'lb-round';
+      if (info && info.isWinner) roundEl.textContent = '—';
+      else if (info) roundEl.textContent = 'R' + info.round;
+      row.appendChild(roundEl);
+
+      var killerEl = document.createElement('span');
+      killerEl.className = 'lb-killer';
+      if (info && info.isWinner) killerEl.textContent = 'Winner';
+      else if (info && info.killedBy >= 0 && info.killedBy !== pi) killerEl.textContent = PN(info.killedBy);
+      else killerEl.textContent = '—';
+      row.appendChild(killerEl);
+
       list.appendChild(row);
     }
   }
@@ -859,7 +920,7 @@ function renderSideLB() {
         var pi = sorted[k];
         var kr = document.createElement('div');
         kr.className = 'side-lb-row';
-        kr.innerHTML = '<span class="lb-rank" style="font-size:12px;">' + killCounts[pi] + '</span><span class="lb-pip" style="background:'+PC(pi).dot+'"></span><span class="lb-name">' + PN(pi) + '</span>';
+        kr.innerHTML = '<span class="lb-rank" style="font-size:12px;">' + killCounts[pi] + '</span><span style="display:flex;align-items:center;gap:4px;"><span class="lb-pip" style="background:'+PC(pi).dot+'"></span><span class="lb-name">' + PN(pi) + '</span></span><span></span><span></span>';
         killDiv.appendChild(kr);
       }
       list.appendChild(killDiv);
@@ -1171,7 +1232,9 @@ function processExplosions(done) {
   }
   updateAllCells(); updateCounts();
   var delay = SIZE >= 20 ? 150 : 300;
+  var gen = gameGeneration;
   setTimeout(function() {
+    if (gen !== gameGeneration) return; // stale callback from old game
     animating = false;
     if (!playgroundMode && allPlaced() && checkWin()) return;
     processExplosions(done);
@@ -1234,7 +1297,7 @@ function showWin(p) {
   paBtn.style.opacity = '';
   paBtn.style.cursor = '';
   paBtn.style.display = '';
-  document.getElementById('overlay').style.display = 'flex';
+  var _ov = document.getElementById('overlay'); if (_ov) _ov.style.display = 'flex';
   renderPlayerBar();
 }
 
@@ -1273,14 +1336,16 @@ function showLocalScreen() {
 }
 
 function goMainMenu() {
-  document.getElementById('local-screen').style.display = 'none';
-  document.getElementById('main-menu').style.display = '';
-  document.getElementById('overlay').style.display = 'none';
-  document.getElementById('death-panel').style.display = 'none';
-  document.getElementById('online-info').style.display = 'none';
+  var ls = document.getElementById('local-screen'); if (ls) ls.style.display = 'none';
+  var mm = document.getElementById('main-menu'); if (mm) mm.style.display = '';
+  var ov = document.getElementById('overlay'); if (ov) ov.style.display = 'none';
+  var dp = document.getElementById('death-panel'); if (dp) dp.style.display = 'none';
+  var oi = document.getElementById('online-info'); if (oi) oi.style.display = 'none';
   hideOLPanels();
   playgroundMode = false;
   gameMode = 'local';
+  animating = false;
+  gameGeneration++;
 }
 
 function startPlayground() {
@@ -1300,7 +1365,7 @@ wins = [];
 for (var i = 0; i < COLORS.length; i++) wins.push(0);
 defaultColorMap();
 // Start at main menu — don't auto-init game
-document.getElementById('local-screen').style.display = 'none';
+var ls = document.getElementById('local-screen'); if (ls) ls.style.display = 'none';
 
 // ======== DEATH SCREEN ========
 function showDeath(playerIdx) {
@@ -1320,7 +1385,7 @@ function showDeath(playerIdx) {
 }
 
 function dismissDeath() {
-  document.getElementById('death-panel').style.display = 'none';
+  var _dp = document.getElementById('death-panel'); if (_dp) _dp.style.display = 'none';
 }
 
 function playAgain() {
@@ -1763,8 +1828,8 @@ function onOLStart(msg) {
 }
 
 function onOLNewGame() {
-  document.getElementById('overlay').style.display = 'none';
-  document.getElementById('death-panel').style.display = 'none';
+  var _ov = document.getElementById('overlay'); if (_ov) _ov.style.display = 'none';
+  var _dp = document.getElementById('death-panel'); if (_dp) _dp.style.display = 'none';
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   moveQueue = []; processing = false;
   olScheduleAI();
@@ -1887,7 +1952,7 @@ function olShowWin(p) {
     paBtn.style.opacity = '0.5';
     paBtn.style.cursor = 'default';
   }
-  document.getElementById('overlay').style.display = 'flex';
+  var _ov = document.getElementById('overlay'); if (_ov) _ov.style.display = 'flex';
   renderPlayerBar();
 }
 
@@ -2145,16 +2210,19 @@ function demoRender() {
 demoInit();
 
 // ======== FIREBASE INIT ========
-var fbApp = firebase.initializeApp({
-  apiKey: "AIzaSyCXfZUsctqRj-J6LnQ-Wb-5wkiDjb-tJM8",
-  authDomain: "chainreaction-usernamelist.firebaseapp.com",
-  databaseURL: "https://chainreaction-usernamelist-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "chainreaction-usernamelist",
-  storageBucket: "chainreaction-usernamelist.firebasestorage.app",
-  messagingSenderId: "1013659619628",
-  appId: "1:1013659619628:web:3100ed4eda5164e5159c89"
-});
-var db = firebase.database();
+var db = null;
+if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
+  var fbApp = firebase.initializeApp({
+    apiKey: "AIzaSyCXfZUsctqRj-J6LnQ-Wb-5wkiDjb-tJM8",
+    authDomain: "chainreaction-usernamelist.firebaseapp.com",
+    databaseURL: "https://chainreaction-usernamelist-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "chainreaction-usernamelist",
+    storageBucket: "chainreaction-usernamelist.firebasestorage.app",
+    messagingSenderId: "1013659619628",
+    appId: "1:1013659619628:web:3100ed4eda5164e5159c89"
+  });
+  db = firebase.database();
+}
 
 // ======== USERNAME SYSTEM ========
 var myUserId = localStorage.getItem('cr-userId') || ('u_' + Math.random().toString(36).substr(2, 10));
@@ -2167,6 +2235,26 @@ function initUsername() {
     showUsername(myUsername);
     registerUsername(myUsername);
   } else {
+    // Generate default username with lowest available number
+    generateDefaultUsername();
+  }
+}
+
+function generateDefaultUsername() {
+  if (db) {
+    db.ref('usernames').once('value', function(snap) {
+      var taken = snap.val() || {};
+      var takenNames = {};
+      for (var k in taken) takenNames[k] = true;
+      var num = 1;
+      while (takenNames['player-' + num]) num++;
+      var defaultName = 'Player-' + num;
+      document.getElementById('uname-input').value = defaultName;
+      promptUsername();
+    });
+  } else {
+    var num = Math.floor(Math.random() * 9000) + 1000;
+    document.getElementById('uname-input').value = 'Player-' + num;
     promptUsername();
   }
 }
@@ -2175,12 +2263,10 @@ function promptUsername() {
   var inp = document.getElementById('uname-input');
   var disp = document.getElementById('uname-display');
   inp.style.display = '';
-  inp.value = '';
-  inp.placeholder = 'Pick a username';
+  if (!inp.value) inp.placeholder = 'Pick a username';
   disp.textContent = '';
   document.getElementById('uname-btn').textContent = 'Set';
   usernameEditing = true;
-  inp.focus();
   inp.onkeydown = function(e) { if (e.key === 'Enter') setUsername(); };
 }
 
@@ -2209,6 +2295,7 @@ function setUsername() {
   var inp = document.getElementById('uname-input');
   var name = inp.value.trim();
   if (!name || name.length < 1) return;
+  if (!db) { myUsername = name; localStorage.setItem('cr-username', myUsername); showUsername(myUsername); updateChatUsernameNotice(); prefillNames(); return; }
   // Check uniqueness
   db.ref('usernames/' + name.toLowerCase()).once('value', function(snap) {
     if (snap.exists() && snap.val() !== myUserId) {
@@ -2216,7 +2303,7 @@ function setUsername() {
       return;
     }
     // Release old username
-    if (myUsername) {
+    if (myUsername && db) {
       db.ref('usernames/' + myUsername.toLowerCase()).remove();
     }
     // Register new
@@ -2224,6 +2311,7 @@ function setUsername() {
     localStorage.setItem('cr-username', myUsername);
     registerUsername(myUsername);
     showUsername(myUsername);
+    updateChatUsernameNotice();
     // Pre-fill online name inputs
     var ci = document.getElementById('ol-create-name');
     if (ci && !ci.value) ci.value = myUsername;
@@ -2233,27 +2321,32 @@ function setUsername() {
 }
 
 function registerUsername(name) {
+  if (!db) return;
   db.ref('usernames/' + name.toLowerCase()).set(myUserId);
-  // Also store reverse lookup
   db.ref('users/' + myUserId).set({ username: name, lastSeen: firebase.database.ServerValue.TIMESTAMP });
 }
 
 // ======== CHAT SYSTEM ========
 var chatTab = 'global';
-var chatOpen = false;
 var chatListeners = {};
-var unreadGlobal = 0, unreadRoom = 0;
 var chatInitialized = false;
 
-function toggleChat() {
-  chatOpen = !chatOpen;
-  document.getElementById('chat-panel').className = 'chat-panel' + (chatOpen ? ' open' : '');
-  if (chatOpen) {
-    if (chatTab === 'global') unreadGlobal = 0;
-    else unreadRoom = 0;
-    updateChatBadge();
-    loadChat();
-    if (!chatInitialized) { listenChat('global'); chatInitialized = true; }
+function initChat() {
+  chatInitialized = true;
+  loadChat();
+  listenChat('global');
+  updateChatUsernameNotice();
+}
+
+function updateChatUsernameNotice() {
+  var notice = document.getElementById('chat-username-notice');
+  if (notice) {
+    notice.style.display = myUsername ? 'none' : '';
+  }
+  var inp = document.getElementById('chat-input');
+  if (inp) {
+    inp.disabled = !myUsername;
+    inp.placeholder = myUsername ? 'Type a message…' : 'Set a username first';
   }
 }
 
@@ -2261,13 +2354,11 @@ function switchChatTab(tab) {
   chatTab = tab;
   document.getElementById('tab-global').className = 'chat-tab' + (tab === 'global' ? ' active' : '');
   document.getElementById('tab-room').className = 'chat-tab' + (tab === 'room' ? ' active' : '');
-  if (tab === 'global') unreadGlobal = 0;
-  else unreadRoom = 0;
-  updateChatBadge();
   loadChat();
 }
 
 function getChatRef() {
+  if (!db) return null;
   if (chatTab === 'room' && roomCode) {
     return db.ref('chat/rooms/' + roomCode);
   }
@@ -2277,8 +2368,11 @@ function getChatRef() {
 function sendChat() {
   var inp = document.getElementById('chat-input');
   var text = inp.value.trim();
-  if (!text || !myUsername) return;
-  getChatRef().push({
+  if (!myUsername) { updateChatUsernameNotice(); return; }
+  if (!text) return;
+  var ref = getChatRef();
+  if (!ref) return;
+  ref.push({
     userId: myUserId,
     username: myUsername,
     text: text,
@@ -2289,6 +2383,7 @@ function sendChat() {
 
 function loadChat() {
   var container = document.getElementById('chat-messages');
+  if (!db) { container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Chat unavailable — Firebase not loaded</div>'; return; }
   container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Loading…</div>';
 
   // Detach old listeners
@@ -2321,20 +2416,11 @@ function loadChat() {
 }
 
 function listenChat(tab) {
+  if (!db) return;
   var ref = (tab === 'room' && roomCode) ? db.ref('chat/rooms/' + roomCode) : db.ref('chat/global');
-  ref.orderByChild('timestamp').limitToLast(1).on('child_added', function(snap) {
-    if (!chatOpen || chatTab !== tab) {
-      if (tab === 'global') unreadGlobal++;
-      else unreadRoom++;
-      updateChatBadge();
-    }
+  ref.orderByChild('timestamp').limitToLast(1).on('child_added', function() {
+    if (chatTab === tab) loadChat();
   });
-}
-
-function updateChatBadge() {
-  var badge = document.getElementById('chat-badge');
-  var total = unreadGlobal + unreadRoom;
-  badge.style.display = total > 0 ? '' : 'none';
 }
 
 function escHtml(s) {
@@ -2487,6 +2573,45 @@ function prefillNames() {
 // Initialize username on page load
 initUsername();
 prefillNames();
+initChat();
+
+// Load public rooms on main menu
+function loadMainPublicRooms() {
+  ensureLobbyAbly(function() {
+    var lc = ably.channels.get('cr-public-lobby');
+    lc.presence.get(function(err, members) {
+      var list = document.getElementById('main-pub-list');
+      if (!list) return;
+      if (err || !members || members.length === 0) {
+        list.innerHTML = '<div style="font-style:italic;opacity:0.6;">No public rooms right now</div>';
+        return;
+      }
+      list.innerHTML = '';
+      for (var i = 0; i < members.length; i++) {
+        var d = members[i].data;
+        if (!d || !d.roomCode) continue;
+        var row = document.createElement('div');
+        row.className = 'main-pub-room';
+        row.innerHTML = '<div class="mpr-info"><div class="mpr-host">' + (d.hostName || 'Host') + '\'s room</div>' +
+          '<div class="mpr-details">' + d.size + '×' + d.size + ' · ' + d.humans + 'H' +
+          (d.ais > 0 ? ' + ' + d.ais + 'AI' : '') + ' · ' + (d.playerCount || 1) + ' in</div></div>' +
+          '<div class="mpr-code">' + d.roomCode + '</div>';
+        (function(code) {
+          row.onclick = function() {
+            document.getElementById('ol-join-code').value = code;
+            showOLPanel('ol-join');
+          };
+        })(d.roomCode);
+        list.appendChild(row);
+      }
+      if (list.children.length === 0) {
+        list.innerHTML = '<div style="font-style:italic;opacity:0.6;">No public rooms right now</div>';
+      }
+    });
+    lc.presence.subscribe(function() { loadMainPublicRooms(); });
+  });
+}
+loadMainPublicRooms();
 </script>
 
 <!-- ONLINE PANELS -->
@@ -2595,16 +2720,20 @@ prefillNames();
 </div>
 
 <!-- CHAT -->
-<button class="chat-toggle" id="chat-toggle" onclick="toggleChat()">💬<div class="chat-badge" id="chat-badge"></div></button>
-<div class="chat-panel" id="chat-panel">
-  <div class="chat-tabs">
-    <button class="chat-tab active" id="tab-global" onclick="switchChatTab('global')">Global</button>
-    <button class="chat-tab" id="tab-room" onclick="switchChatTab('room')">Room</button>
-  </div>
-  <div class="chat-messages" id="chat-messages"></div>
-  <div class="chat-input-row">
-    <input type="text" id="chat-input" placeholder="Type a message…" maxlength="200" onkeydown="if(event.key==='Enter')sendChat();">
-    <button onclick="sendChat()">Send</button>
+<div class="chat-section" id="chat-section">
+  <div class="chat-card">
+    <div class="chat-tabs">
+      <button class="chat-tab active" id="tab-global" onclick="switchChatTab('global')">Global Chat</button>
+      <button class="chat-tab" id="tab-room" onclick="switchChatTab('room')">Room Chat</button>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+      <div style="font-size:12px;color:#ccc;text-align:center;padding:1rem;">Set a username to start chatting</div>
+    </div>
+    <div id="chat-username-notice" style="padding:6px 12px;font-size:11px;color:#e87ea8;text-align:center;display:none;">Set a username (top right) to send messages</div>
+    <div class="chat-input-row">
+      <input type="text" id="chat-input" placeholder="Type a message…" maxlength="200" onkeydown="if(event.key==='Enter')sendChat();">
+      <button onclick="sendChat()">Send</button>
+    </div>
   </div>
 </div>
 
