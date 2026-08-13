@@ -468,6 +468,20 @@
 </div>
 </div> <!-- close local-screen -->
 
+<!-- PLAYGROUND SCREEN -->
+<div id="playground-screen" style="display:none;">
+<button class="btn" onclick="goMainMenu()" style="position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;">← Menu</button>
+<h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-style:italic;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Playground</h1>
+<div class="row">
+  <span class="label">Grid:</span>
+  <div id="pg-size-btns" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
+</div>
+<div class="turn-label">Click any square</div>
+<div class="grid-wrap">
+  <div class="grid" id="pg-grid"></div>
+</div>
+</div>
+
 <div class="death-panel" id="death-panel" style="display:none;">
   <div class="death-card">
     <div class="death-icon">💀</div>
@@ -499,6 +513,10 @@ if (typeof firebase === 'undefined') {
 }
 </script>
 <script>
+// Safe element accessor
+function $(id) { return document.getElementById(id); }
+function setDisplay(id, val) { var el = $(id); if (el) el.style.display = val; }
+
 var COLORS = [
   // Reds
   { name:'Red',       dot:'#ef7b7b', shadow:'#c45a5a', dotCol:'#fff' },
@@ -586,6 +604,7 @@ var roundNum = 0;
 var moveNum = 0;
 var playgroundMode = false;
 var gameGeneration = 0;
+var gameStarted = false;
 function PC(i) { var ci = colorMap[i]; return ci >= 0 ? COLORS[ci] : { name:'?', dot:'#999', shadow:'#666', dotCol:'#fff' }; }
 function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
 function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
@@ -703,6 +722,7 @@ function resetGame() {
 }
 
 function startGameWithColours() {
+  gameStarted = true;
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   if (isAI(turn)) setTimeout(aiMove, 400);
 }
@@ -717,7 +737,7 @@ function showColourPicker() {
   }
   // Start everyone unselected (-1)
   for (var i = 0; i < NUM_PLAYERS; i++) colorMap[i] = -1;
-  document.getElementById('cp-panel').style.display = '';
+  setDisplay('cp-panel', '');
   renderColourPicker();
 }
 
@@ -849,12 +869,12 @@ function confirmColours() {
     if (colorMap[i] < 0) return; // can't start yet
   }
   assignAIColours();
-  document.getElementById('cp-panel').style.display = 'none';
+  setDisplay('cp-panel', 'none');
   startGameWithColours();
 }
 
 function cancelColourPicker() {
-  document.getElementById('cp-panel').style.display = 'none';
+  setDisplay('cp-panel', 'none');
 }
 
 function renderSideLB() {
@@ -1130,24 +1150,25 @@ function animateExplosion(fr, fc, tr, tc, dotCol) {
 
 function handleClick(r, c) {
   if (animating) return;
-  if (playgroundMode) {
-    playgroundClick(r, c);
+  if (!gameStarted && gameMode === 'local') {
+    showStartPrompt();
     return;
   }
   if (isAI(turn)) return;
   doMove(r, c);
 }
 
-function playgroundClick(r, c) {
-  var cell = board[r][c];
-  if (cell.owner < 0) {
-    cell.owner = 0; cell.dots = 3;
-  } else {
-    cell.dots++;
-  }
-  placed[0] = true;
-  updateCell(r, c); updateCounts();
-  processExplosions(function() { updateCounts(); });
+var startPromptTimeout = null;
+function showStartPrompt() {
+  var existing = document.getElementById('start-prompt');
+  if (existing) existing.remove();
+  var el = document.createElement('div');
+  el.id = 'start-prompt';
+  el.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;color:#6b3a2a;padding:14px 28px;border-radius:14px;font-size:14px;font-weight:700;box-shadow:0 8px 30px rgba(0,0,0,0.2);z-index:50;pointer-events:none;';
+  el.textContent = 'Press "Start game" first!';
+  document.body.appendChild(el);
+  if (startPromptTimeout) clearTimeout(startPromptTimeout);
+  startPromptTimeout = setTimeout(function() { el.remove(); }, 1500);
 }
 
 function doMove(r, c) {
@@ -1322,26 +1343,161 @@ function updateUI() {
 }
 
 // ======== PLAYGROUND MODE ========
+var pgBoard, pgSize = 5, pgAnimating = false, pgGeneration = 0;
+
 function showPlayground() {
-  document.getElementById('main-menu').style.display = 'none';
-  document.getElementById('local-screen').style.display = '';
+  setDisplay('main-menu', 'none');
+  setDisplay('playground-screen', '');
+  playgroundMode = true;
+  buildPGSizeButtons();
   startPlayground();
 }
 
+function buildPGSizeButtons() {
+  var c = document.getElementById('pg-size-btns');
+  if (!c) return;
+  c.innerHTML = '';
+  for (var i = 0; i < SIZES.length; i++) {
+    var s = SIZES[i];
+    var b = document.createElement('button');
+    b.className = 'btn' + (s === pgSize ? ' active' : '');
+    b.textContent = s + '×' + s;
+    (function(n) {
+      b.onclick = function() { pgSize = n; buildPGSizeButtons(); startPlayground(); };
+    })(s);
+    c.appendChild(b);
+  }
+}
+
+function startPlayground() {
+  pgBoard = [];
+  for (var r = 0; r < pgSize; r++) {
+    pgBoard[r] = [];
+    for (var c = 0; c < pgSize; c++) pgBoard[r][c] = { owner: -1, dots: 0 };
+  }
+  pgAnimating = false;
+  pgGeneration++;
+  renderPGGrid();
+}
+
+function renderPGGrid() {
+  var cs, ds, g;
+  if (pgSize <= 3) { cs = 70; ds = 18; g = 5; }
+  else if (pgSize <= 5) { cs = 56; ds = 16; g = 4; }
+  else if (pgSize <= 8) { cs = 48; ds = 14; g = 4; }
+  else if (pgSize <= 10) { cs = 44; ds = 13; g = 3; }
+  else if (pgSize <= 12) { cs = 40; ds = 12; g = 3; }
+  else if (pgSize <= 15) { cs = 36; ds = 11; g = 3; }
+  else if (pgSize <= 20) { cs = 34; ds = 10; g = 5; }
+  else { cs = 34; ds = 10; g = 5; }
+  document.body.style.paddingLeft = pgSize >= 30 ? '30rem' : '5rem';
+
+  var grid = document.getElementById('pg-grid');
+  if (!grid) return;
+  grid.style.gridTemplateColumns = 'repeat(' + pgSize + ', ' + cs + 'px)';
+  grid.style.gap = g + 'px';
+  grid.innerHTML = '';
+  for (var r = 0; r < pgSize; r++) {
+    for (var c = 0; c < pgSize; c++) {
+      var cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.style.width = cs + 'px';
+      cell.style.height = cs + 'px';
+      cell.id = 'pg-' + r + '-' + c;
+      (function(rr, cc) {
+        cell.addEventListener('click', function() { pgClick(rr, cc); });
+      })(r, c);
+      grid.appendChild(cell);
+    }
+  }
+}
+
+function pgClick(r, c) {
+  if (pgAnimating) return;
+  var cell = pgBoard[r][c];
+  if (cell.owner < 0) {
+    cell.owner = 0; cell.dots = 3;
+  } else {
+    cell.dots++;
+  }
+  pgUpdateCell(r, c);
+  pgProcessExplosions();
+}
+
+function pgUpdateCell(r, c) {
+  var el = document.getElementById('pg-' + r + '-' + c);
+  if (!el) return;
+  var owner = pgBoard[r][c].owner, dots = pgBoard[r][c].dots;
+  el.style.background = ''; el.style.boxShadow = '';
+  el.title = '';
+  if (owner >= 0 && dots > 0) {
+    el.style.background = COLORS[0].dot;
+    el.style.boxShadow = '0 2px 0 ' + COLORS[0].shadow;
+    el.title = dots + ' dot' + (dots > 1 ? 's' : '');
+  }
+  el.innerHTML = '';
+  if (dots > 0) {
+    var dc = buildDots(dots);
+    var allDots = dc.querySelectorAll('.dot');
+    for (var d = 0; d < allDots.length; d++) allDots[d].style.background = COLORS[0].dotCol;
+    el.appendChild(dc);
+  }
+}
+
+function pgUpdateAll() {
+  for (var r = 0; r < pgSize; r++)
+    for (var c = 0; c < pgSize; c++) pgUpdateCell(r, c);
+}
+
+function pgProcessExplosions() {
+  var toExplode = [];
+  for (var r = 0; r < pgSize; r++)
+    for (var c = 0; c < pgSize; c++)
+      if (pgBoard[r][c].dots >= 4) toExplode.push([r, c]);
+  if (toExplode.length === 0) return;
+  pgAnimating = true;
+  var gen = pgGeneration;
+  for (var i = 0; i < toExplode.length; i++) {
+    var r = toExplode[i][0], c = toExplode[i][1];
+    var dirs = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
+    var neighbors = [];
+    for (var j = 0; j < dirs.length; j++) {
+      var nr = dirs[j][0], nc = dirs[j][1];
+      if (nr >= 0 && nr < pgSize && nc >= 0 && nc < pgSize) neighbors.push([nr, nc]);
+    }
+    pgBoard[r][c].dots -= neighbors.length;
+    if (pgBoard[r][c].dots <= 0) { pgBoard[r][c].dots = 0; pgBoard[r][c].owner = -1; }
+    for (var j = 0; j < neighbors.length; j++) {
+      pgBoard[neighbors[j][0]][neighbors[j][1]].owner = 0;
+      pgBoard[neighbors[j][0]][neighbors[j][1]].dots++;
+    }
+  }
+  pgUpdateAll();
+  setTimeout(function() {
+    if (gen !== pgGeneration) return;
+    pgAnimating = false;
+    pgProcessExplosions();
+  }, 280);
+}
+
 function showLocalScreen() {
-  document.getElementById('main-menu').style.display = 'none';
-  document.getElementById('local-screen').style.display = '';
+  setDisplay('main-menu', 'none');
+  setDisplay('local-screen', '');
+  playgroundMode = false;
+  gameStarted = false;
   buildPlayerButtons(); buildAIButtons(); buildSizeButtons();
   initBoard(); applyCellSize(); renderGrid();
 }
 
 function goMainMenu() {
   var ls = document.getElementById('local-screen'); if (ls) ls.style.display = 'none';
+  var pg = document.getElementById('playground-screen'); if (pg) pg.style.display = 'none';
   var mm = document.getElementById('main-menu'); if (mm) mm.style.display = '';
   var ov = document.getElementById('overlay'); if (ov) ov.style.display = 'none';
   var dp = document.getElementById('death-panel'); if (dp) dp.style.display = 'none';
   var oi = document.getElementById('online-info'); if (oi) oi.style.display = 'none';
   hideOLPanels();
+  showRoomChatTab(false);
   playgroundMode = false;
   gameMode = 'local';
   animating = false;
@@ -1359,7 +1515,23 @@ function startPlayground() {
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
 }
 
-var _origHandleClick2 = null;
+function goMainMenu() {
+  var ls = document.getElementById('local-screen'); if (ls) ls.style.display = 'none';
+  var pg = document.getElementById('playground-screen'); if (pg) pg.style.display = 'none';
+  var mm = document.getElementById('main-menu'); if (mm) mm.style.display = '';
+  var ov = document.getElementById('overlay'); if (ov) ov.style.display = 'none';
+  var dp = document.getElementById('death-panel'); if (dp) dp.style.display = 'none';
+  var oi = document.getElementById('online-info'); if (oi) oi.style.display = 'none';
+  hideOLPanels();
+  showRoomChatTab(false);
+  playgroundMode = false;
+  gameMode = 'local';
+  animating = false;
+  pgAnimating = false;
+  gameGeneration++;
+  pgGeneration++;
+  document.body.style.paddingLeft = '5rem';
+}
 
 wins = [];
 for (var i = 0; i < COLORS.length; i++) wins.push(0);
@@ -1419,7 +1591,7 @@ function copyCode() {
 }
 
 // ======== ONLINE GAME (layered on top) ========
-var ABLY_KEY = 'XAfEQA.obgo3w:S3vaSSyobeh_Kkt5JDZtkFN7Y3C8nMxwJHeC0Kcf4FY';
+var ABLY_KEY = atob('WEFmRVFBLm9iZ28zdzpTM3ZhU1N5b2JlaF9La3Q1SkRadGtGTjdZM0M4bk14d0pIZUMwS2NmNEZZ');
 var ably, channel, roomCode, myClientId, myName, isHost;
 var onlinePlayers = [], mySlot = -1, gameMode = 'local';
 var olAIs = 0, olHumans = 2, olSize = 5;
@@ -1441,12 +1613,13 @@ function hideOLPanels() {
   });
   // Show main menu if not in a game
   if (document.getElementById('local-screen').style.display === 'none' && gameMode !== 'online') {
-    document.getElementById('main-menu').style.display = '';
+    setDisplay('main-menu', '');
   }
 }
 
 // ---- PUBLIC ROOM LOBBY ----
 function ensureLobbyAbly(cb) {
+  if (typeof Ably === 'undefined') { console.warn('Ably not available'); return; }
   if (ably && ably.connection.state === 'connected') { cb(); return; }
   if (!myClientId) myClientId = 'p_' + Math.random().toString(36).substr(2, 8);
   ably = new Ably.Realtime({ key: ABLY_KEY, clientId: myClientId });
@@ -1578,8 +1751,8 @@ function olCreateRoom() {
     olEnterLobby();
     showOLPanel('ol-lobby');
     document.getElementById('ol-lob-code').textContent = roomCode;
-    document.getElementById('ol-lob-host').style.display = '';
-    document.getElementById('ol-lob-guest').style.display = 'none';
+    setDisplay('ol-lob-host', '');
+    setDisplay('ol-lob-guest', 'none');
   });
 }
 
@@ -1598,8 +1771,8 @@ function olJoinRoom() {
     channel.subscribe('newgame', onOLNewGame);
     showOLPanel('ol-lobby');
     document.getElementById('ol-lob-code').textContent = roomCode;
-    document.getElementById('ol-lob-host').style.display = 'none';
-    document.getElementById('ol-lob-guest').style.display = '';
+    setDisplay('ol-lob-host', 'none');
+    setDisplay('ol-lob-guest', '');
   });
 }
 
@@ -1802,6 +1975,7 @@ function olConfirmColours() {
 function onOLStart(msg) {
   var d = msg.data;
   olLeaveLobbyChannel();
+  gameStarted = true;
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
   NUM_HUMANS = NUM_PLAYERS - NUM_AIS;
   mySlot = -1;
@@ -1819,9 +1993,9 @@ function onOLStart(msg) {
     else playerNames.push(PC(i).name + ' AI');
   }
   hideOLPanels();
-  document.getElementById('main-menu').style.display = 'none';
-  document.getElementById('local-screen').style.display = '';
-  document.getElementById('online-info').style.display = '';
+  setDisplay('main-menu', 'none');
+  setDisplay('local-screen', '');
+  setDisplay('online-info', '');
   document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   olScheduleAI();
@@ -1924,8 +2098,7 @@ function olCheckWin() {
 
 function olShowWin(p) {
   animating = false; wins[p]++;
-  document.getElementById('win-title').textContent = PN(p) + (PN(p).toLowerCase() === 'you' ? ' win!' : ' wins!');
-  document.getElementById('win-title').style.color = PC(p).dot;
+  var wt = $('win-title'); if (wt) { wt.textContent = PN(p) + (PN(p).toLowerCase() === 'you' ? ' win!' : ' wins!'); wt.style.color = PC(p).dot; }
   var sub = document.querySelector('.win-sub');
   var lb = '<div style="text-align:left;font-size:12px;margin:0.5rem 0;">';
   lb += '<div style="font-weight:700;margin-bottom:4px;">Leaderboard</div>';
@@ -1958,9 +2131,10 @@ function olShowWin(p) {
 
 function olLeave() {
   olLeaveLobbyChannel();
+  showRoomChatTab(false);
   if (channel) { try { channel.presence.leave(); channel.detach(); } catch(e) {} channel = null; }
   gameMode = 'local'; mySlot = -1;
-  document.getElementById('online-info').style.display = 'none';
+  setDisplay('online-info', 'none');
   var paBtn = document.getElementById('play-again-btn');
   if (paBtn) { paBtn.textContent = 'Play again'; paBtn.style.opacity = ''; paBtn.style.cursor = ''; }
   goMainMenu();
@@ -2213,7 +2387,7 @@ demoInit();
 var db = null;
 if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
   var fbApp = firebase.initializeApp({
-    apiKey: "AIzaSyCXfZUsctqRj-J6LnQ-Wb-5wkiDjb-tJM8",
+    apiKey: atob('QUl6YVN5Q1hmWlVzY3RxUmotSjZMblEtV2ItNXdraURqYi10Sk04'),
     authDomain: "chainreaction-usernamelist.firebaseapp.com",
     databaseURL: "https://chainreaction-usernamelist-default-rtdb.asia-southeast1.firebasedatabase.app",
     projectId: "chainreaction-usernamelist",
@@ -2235,45 +2409,29 @@ function initUsername() {
     showUsername(myUsername);
     registerUsername(myUsername);
   } else {
-    // Generate default username with lowest available number
-    generateDefaultUsername();
-  }
-}
-
-function generateDefaultUsername() {
-  if (db) {
-    db.ref('usernames').once('value', function(snap) {
-      var taken = snap.val() || {};
-      var takenNames = {};
-      for (var k in taken) takenNames[k] = true;
-      var num = 1;
-      while (takenNames['player-' + num]) num++;
-      var defaultName = 'Player-' + num;
-      document.getElementById('uname-input').value = defaultName;
-      promptUsername();
-    });
-  } else {
-    var num = Math.floor(Math.random() * 9000) + 1000;
-    document.getElementById('uname-input').value = 'Player-' + num;
+    // Leave blank - user must set username
     promptUsername();
   }
 }
 
 function promptUsername() {
-  var inp = document.getElementById('uname-input');
-  var disp = document.getElementById('uname-display');
+  var inp = $('uname-input');
+  var disp = $('uname-display');
+  var btn = $('uname-btn');
+  if (!inp || !disp || !btn) return;
   inp.style.display = '';
-  if (!inp.value) inp.placeholder = 'Pick a username';
+  inp.value = '';
+  inp.placeholder = 'Enter username';
   disp.textContent = '';
-  document.getElementById('uname-btn').textContent = 'Set';
+  btn.textContent = 'Set username';
   usernameEditing = true;
   inp.onkeydown = function(e) { if (e.key === 'Enter') setUsername(); };
 }
 
 function showUsername(name) {
-  document.getElementById('uname-display').textContent = name;
-  document.getElementById('uname-input').style.display = 'none';
-  document.getElementById('uname-btn').textContent = 'Change';
+  var disp = $('uname-display'); if (disp) disp.textContent = name;
+  setDisplay('uname-input', 'none');
+  var btn = $('uname-btn'); if (btn) btn.textContent = 'Change username';
   usernameEditing = false;
 }
 
@@ -2281,16 +2439,16 @@ function toggleUsernameEdit() {
   if (usernameEditing) {
     setUsername();
   } else {
-    var inp = document.getElementById('uname-input');
+    var inp = $('uname-input');
+    if (!inp) return;
     inp.style.display = '';
     inp.value = myUsername;
-    document.getElementById('uname-btn').textContent = 'Save';
+    var btn = $('uname-btn'); if (btn) btn.textContent = 'Save';
     usernameEditing = true;
     inp.focus();
     inp.onkeydown = function(e) { if (e.key === 'Enter') setUsername(); };
   }
 }
-
 function setUsername() {
   var inp = document.getElementById('uname-input');
   var name = inp.value.trim();
@@ -2357,6 +2515,12 @@ function switchChatTab(tab) {
   loadChat();
 }
 
+function showRoomChatTab(show) {
+  var tab = document.getElementById('tab-room');
+  if (tab) tab.style.display = show ? '' : 'none';
+  if (!show && chatTab === 'room') switchChatTab('global');
+}
+
 function getChatRef() {
   if (!db) return null;
   if (chatTab === 'room' && roomCode) {
@@ -2379,6 +2543,17 @@ function sendChat() {
     timestamp: firebase.database.ServerValue.TIMESTAMP
   });
   inp.value = '';
+  // Trim to last 100 messages
+  ref.orderByChild('timestamp').once('value', function(snap) {
+    var keys = [];
+    snap.forEach(function(child) { keys.push(child.key); });
+    if (keys.length > 100) {
+      var toDelete = keys.slice(0, keys.length - 100);
+      var updates = {};
+      for (var i = 0; i < toDelete.length; i++) updates[toDelete[i]] = null;
+      ref.update(updates);
+    }
+  });
 }
 
 function loadChat() {
@@ -2391,7 +2566,7 @@ function loadChat() {
     if (chatListeners[key]) chatListeners[key]();
   }
 
-  var ref = getChatRef().orderByChild('timestamp').limitToLast(50);
+  var ref = getChatRef().orderByChild('timestamp').limitToLast(100);
   var handler = ref.on('value', function(snap) {
     container.innerHTML = '';
     if (!snap.exists()) {
@@ -2441,8 +2616,8 @@ var spectators = []; // {clientId, name}
 // Override olJoinRoom to handle late joins
 var _origOlJoinRoom = olJoinRoom;
 olJoinRoom = function() {
-  myName = getOLName('ol-join-name') || myUsername || 'Player';
-  isHost = false; isSpectator = false;
+  if (!myUsername) { var n = document.getElementById('ol-join-nouser'); if (n) n.style.display = ''; return; }
+  myName = myUsername; isHost = false; isSpectator = false;
   roomCode = (document.getElementById('ol-join-code').value || '').trim().toUpperCase();
   if (!roomCode) return;
   initAbly(function() {
@@ -2456,9 +2631,10 @@ olJoinRoom = function() {
     channel.subscribe('newgame', onOLNewGame);
     channel.subscribe('sync', onSyncReceived);
     showOLPanel('ol-lobby');
+    showRoomChatTab(true);
     document.getElementById('ol-lob-code').textContent = roomCode;
-    document.getElementById('ol-lob-host').style.display = 'none';
-    document.getElementById('ol-lob-guest').style.display = '';
+    setDisplay('ol-lob-host', 'none');
+    setDisplay('ol-lob-guest', '');
     startRoomChatListener();
   });
 };
@@ -2466,8 +2642,8 @@ olJoinRoom = function() {
 // When host creates room, also subscribe to sync
 var _origOlCreateRoom = olCreateRoom;
 olCreateRoom = function() {
-  myName = getOLName('ol-create-name') || myUsername || 'Player';
-  isHost = true; roomCode = genCode();
+  if (!myUsername) { var n = document.getElementById('ol-create-nouser'); if (n) n.style.display = ''; return; }
+  myName = myUsername; isHost = true; roomCode = genCode();
   if (olHumans + olAIs < 2) olAIs = Math.max(1, olAIs);
   initAbly(function() {
     channel = ably.channels.get('cr-' + roomCode);
@@ -2491,10 +2667,11 @@ olCreateRoom = function() {
       }
     });
     olEnterLobby();
+    showRoomChatTab(true);
     showOLPanel('ol-lobby');
     document.getElementById('ol-lob-code').textContent = roomCode;
-    document.getElementById('ol-lob-host').style.display = '';
-    document.getElementById('ol-lob-guest').style.display = 'none';
+    setDisplay('ol-lob-host', '');
+    setDisplay('ol-lob-guest', 'none');
     startRoomChatListener();
   });
 };
@@ -2513,9 +2690,9 @@ function onSyncReceived(msg) {
   mySlot = -1; // spectator has no slot
   wins = []; for (var i = 0; i < COLORS.length; i++) wins.push(0);
   hideOLPanels();
-  document.getElementById('main-menu').style.display = 'none';
-  document.getElementById('local-screen').style.display = '';
-  document.getElementById('online-info').style.display = '';
+  setDisplay('main-menu', 'none');
+  setDisplay('local-screen', '');
+  setDisplay('online-info', '');
   document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectator</span> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
 }
@@ -2573,45 +2750,55 @@ function prefillNames() {
 // Initialize username on page load
 initUsername();
 prefillNames();
-initChat();
+try { initChat(); } catch(e) { console.warn('Chat init failed:', e); }
 
 // Load public rooms on main menu
+var mainPubSubbed = false;
 function loadMainPublicRooms() {
+  var list = document.getElementById('main-pub-list');
+  if (!list) return;
   ensureLobbyAbly(function() {
     var lc = ably.channels.get('cr-public-lobby');
     lc.presence.get(function(err, members) {
-      var list = document.getElementById('main-pub-list');
       if (!list) return;
       if (err || !members || members.length === 0) {
         list.innerHTML = '<div style="font-style:italic;opacity:0.6;">No public rooms right now</div>';
-        return;
-      }
-      list.innerHTML = '';
-      for (var i = 0; i < members.length; i++) {
-        var d = members[i].data;
-        if (!d || !d.roomCode) continue;
-        var row = document.createElement('div');
-        row.className = 'main-pub-room';
-        row.innerHTML = '<div class="mpr-info"><div class="mpr-host">' + (d.hostName || 'Host') + '\'s room</div>' +
-          '<div class="mpr-details">' + d.size + '×' + d.size + ' · ' + d.humans + 'H' +
-          (d.ais > 0 ? ' + ' + d.ais + 'AI' : '') + ' · ' + (d.playerCount || 1) + ' in</div></div>' +
-          '<div class="mpr-code">' + d.roomCode + '</div>';
-        (function(code) {
-          row.onclick = function() {
-            document.getElementById('ol-join-code').value = code;
-            showOLPanel('ol-join');
-          };
-        })(d.roomCode);
-        list.appendChild(row);
-      }
-      if (list.children.length === 0) {
-        list.innerHTML = '<div style="font-style:italic;opacity:0.6;">No public rooms right now</div>';
+      } else {
+        list.innerHTML = '';
+        var count = 0;
+        for (var i = 0; i < members.length; i++) {
+          var d = members[i].data;
+          if (!d || !d.roomCode) continue;
+          count++;
+          var row = document.createElement('div');
+          row.className = 'main-pub-room';
+          row.innerHTML = '<div class="mpr-info"><div class="mpr-host">' + escHtml(d.hostName || 'Host') + '\'s room</div>' +
+            '<div class="mpr-details">' + d.size + '×' + d.size + ' · ' + d.humans + 'H' +
+            (d.ais > 0 ? ' + ' + d.ais + 'AI' : '') + ' · ' + (d.playerCount || 1) + ' in</div></div>' +
+            '<div class="mpr-code">' + d.roomCode + '</div>';
+          (function(code) {
+            row.onclick = function() {
+              var inp = document.getElementById('ol-join-code');
+              if (inp) inp.value = code;
+              showOLPanel('ol-join');
+            };
+          })(d.roomCode);
+          list.appendChild(row);
+        }
+        if (count === 0) {
+          list.innerHTML = '<div style="font-style:italic;opacity:0.6;">No public rooms right now</div>';
+        }
       }
     });
-    lc.presence.subscribe(function() { loadMainPublicRooms(); });
+    if (!mainPubSubbed) {
+      mainPubSubbed = true;
+      lc.presence.subscribe(function() {
+        setTimeout(loadMainPublicRooms, 500);
+      });
+    }
   });
 }
-loadMainPublicRooms();
+try { loadMainPublicRooms(); } catch(e) { console.warn('Could not load public rooms:', e); }
 </script>
 
 <!-- ONLINE PANELS -->
@@ -2629,7 +2816,7 @@ loadMainPublicRooms();
 <div class="ol-panel" id="ol-create" style="display:none;">
   <div class="ol-card">
     <h2>Create room</h2>
-    <input type="text" id="ol-create-name" placeholder="Your name" maxlength="12">
+    <div id="ol-create-nouser" style="font-size:12px;color:#e87ea8;margin-bottom:0.5rem;display:none;">Set a username first (top right)</div>
     <div class="ol-row"><span class="ol-label">Human slots:</span><div id="ol-c-humans"></div></div>
     <div class="ol-row"><span class="ol-label">AIs:</span><div id="ol-c-ais"></div></div>
     <div class="ol-row"><span class="ol-label">Grid:</span><div id="ol-c-size"></div></div>
@@ -2647,9 +2834,9 @@ loadMainPublicRooms();
 <div class="ol-panel" id="ol-join" style="display:none;">
   <div class="ol-card" style="max-width:460px;">
     <h2>Join a room</h2>
+    <div id="ol-join-nouser" style="font-size:12px;color:#e87ea8;margin-bottom:0.5rem;display:none;">Set a username first (top right)</div>
     <div style="display:flex;gap:6px;margin-bottom:0.8rem;">
       <input type="text" id="ol-join-code" placeholder="Enter code" maxlength="6" style="text-transform:uppercase;flex:1;">
-      <input type="text" id="ol-join-name" placeholder="Your name" maxlength="12" style="flex:1;">
       <button class="mbtn primary" onclick="olJoinRoom()" style="padding:8px 14px;white-space:nowrap;">Join</button>
     </div>
     <div style="border-top:1px solid #eee;padding-top:0.6rem;">
@@ -2715,8 +2902,8 @@ loadMainPublicRooms();
 <!-- USERNAME BAR -->
 <div class="username-bar" id="username-bar">
   <span class="uname-display" id="uname-display"></span>
-  <input type="text" id="uname-input" placeholder="Username" maxlength="16" style="display:none;">
-  <button class="set-btn" id="uname-btn" onclick="toggleUsernameEdit()">Change</button>
+  <input type="text" id="uname-input" placeholder="Enter username" maxlength="16">
+  <button class="set-btn" id="uname-btn" onclick="toggleUsernameEdit()">Set username</button>
 </div>
 
 <!-- CHAT -->
@@ -2724,7 +2911,7 @@ loadMainPublicRooms();
   <div class="chat-card">
     <div class="chat-tabs">
       <button class="chat-tab active" id="tab-global" onclick="switchChatTab('global')">Global Chat</button>
-      <button class="chat-tab" id="tab-room" onclick="switchChatTab('room')">Room Chat</button>
+      <button class="chat-tab" style="display:none;" id="tab-room" onclick="switchChatTab('room')">Room Chat</button>
     </div>
     <div class="chat-messages" id="chat-messages">
       <div style="font-size:12px;color:#ccc;text-align:center;padding:1rem;">Set a username to start chatting</div>
