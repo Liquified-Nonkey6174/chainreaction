@@ -267,7 +267,7 @@
     font-size: 3rem; font-weight: 900; margin-bottom: 0.3rem;
     text-shadow: 0 3px 12px rgba(0,0,0,0.25); letter-spacing: -0.03em;
     font-family: 'Georgia', 'Times New Roman', serif;
-    font-style: italic;
+    
   }
   .main-menu-btns {
     display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem;
@@ -420,7 +420,7 @@
 
 <button class="btn" onclick="goMainMenu()" style="position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;">← Menu</button>
 
-<h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-style:italic;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Chain Reaction</h1>
+<h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Chain Reaction</h1>
 
 <div class="row">
   <span class="label">Humans:</span>
@@ -471,7 +471,7 @@
 <!-- PLAYGROUND SCREEN -->
 <div id="playground-screen" style="display:none;">
 <button class="btn" onclick="goMainMenu()" style="position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;">← Menu</button>
-<h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-style:italic;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Playground</h1>
+<h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Playground</h1>
 <div class="row">
   <span class="label">Grid:</span>
   <div id="pg-size-btns" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
@@ -1344,32 +1344,57 @@ function updateUI() {
 
 // ======== PLAYGROUND MODE ========
 var pgBoard, pgSize = 5, pgAnimating = false, pgGeneration = 0;
+var pgCellSize = 56, pgDotSize = 16;
 
 function showPlayground() {
-  setDisplay('main-menu', 'none');
-  setDisplay('playground-screen', '');
-  playgroundMode = true;
-  buildPGSizeButtons();
-  startPlayground();
-}
-
-function buildPGSizeButtons() {
-  var c = document.getElementById('pg-size-btns');
-  if (!c) return;
-  c.innerHTML = '';
-  for (var i = 0; i < SIZES.length; i++) {
-    var s = SIZES[i];
-    var b = document.createElement('button');
-    b.className = 'btn' + (s === pgSize ? ' active' : '');
-    b.textContent = s + '×' + s;
-    (function(n) {
-      b.onclick = function() { pgSize = n; buildPGSizeButtons(); startPlayground(); };
-    })(s);
-    c.appendChild(b);
+  var mm = document.getElementById('main-menu'); if (mm) mm.style.display = 'none';
+  var ls = document.getElementById('local-screen'); if (ls) ls.style.display = 'none';
+  var pg = document.getElementById('playground-screen');
+  if (!pg) {
+    // Create playground screen dynamically if it doesn't exist
+    pg = document.createElement('div');
+    pg.id = 'playground-screen';
+    document.body.insertBefore(pg, document.getElementById('death-panel'));
   }
-}
+  pg.style.display = '';
+  pg.innerHTML = '';
+  playgroundMode = true;
 
-function startPlayground() {
+  // Menu button
+  var menuBtn = document.createElement('button');
+  menuBtn.className = 'btn';
+  menuBtn.textContent = '← Menu';
+  menuBtn.style.cssText = 'position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;';
+  menuBtn.onclick = goMainMenu;
+  pg.appendChild(menuBtn);
+
+  // Title
+  var h = document.createElement('h1');
+  h.textContent = 'Playground';
+  h.style.cssText = "text-align:center;font-family:'Georgia',serif;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);color:#fff;";
+  pg.appendChild(h);
+
+  // Size buttons
+  var sizeRow = document.createElement('div');
+  sizeRow.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap;justify-content:center;margin-bottom:0.5rem;';
+  for (var i = 0; i < SIZES.length; i++) {
+    (function(s) {
+      var b = document.createElement('button');
+      b.className = 'btn' + (s === pgSize ? ' active' : '');
+      b.textContent = s + '×' + s;
+      b.onclick = function() { pgSize = s; showPlayground(); };
+      sizeRow.appendChild(b);
+    })(SIZES[i]);
+  }
+  pg.appendChild(sizeRow);
+
+  // Label
+  var lbl = document.createElement('div');
+  lbl.textContent = 'Click any square';
+  lbl.style.cssText = 'text-align:center;font-size:12px;font-weight:600;opacity:0.7;color:#fff;margin-bottom:0.5rem;';
+  pg.appendChild(lbl);
+
+  // Init board
   pgBoard = [];
   for (var r = 0; r < pgSize; r++) {
     pgBoard[r] = [];
@@ -1377,10 +1402,8 @@ function startPlayground() {
   }
   pgAnimating = false;
   pgGeneration++;
-  renderPGGrid();
-}
 
-function renderPGGrid() {
+  // Build grid
   var cs, ds, g;
   if (pgSize <= 3) { cs = 70; ds = 18; g = 5; }
   else if (pgSize <= 5) { cs = 56; ds = 16; g = 4; }
@@ -1390,26 +1413,24 @@ function renderPGGrid() {
   else if (pgSize <= 15) { cs = 36; ds = 11; g = 3; }
   else if (pgSize <= 20) { cs = 34; ds = 10; g = 5; }
   else { cs = 34; ds = 10; g = 5; }
-  document.body.style.paddingLeft = pgSize >= 30 ? '30rem' : '5rem';
 
-  var grid = document.getElementById('pg-grid');
-  if (!grid) return;
-  grid.style.gridTemplateColumns = 'repeat(' + pgSize + ', ' + cs + 'px)';
-  grid.style.gap = g + 'px';
-  grid.innerHTML = '';
+  var gridEl = document.createElement('div');
+  gridEl.id = 'pg-grid';
+  gridEl.style.cssText = 'display:grid;gap:' + g + 'px;grid-template-columns:repeat(' + pgSize + ',' + cs + 'px);width:fit-content;padding:8px;background:rgba(0,0,0,0.08);border-radius:14px;margin:0 auto;';
   for (var r = 0; r < pgSize; r++) {
     for (var c = 0; c < pgSize; c++) {
       var cell = document.createElement('div');
-      cell.className = 'cell';
-      cell.style.width = cs + 'px';
-      cell.style.height = cs + 'px';
       cell.id = 'pg-' + r + '-' + c;
+      cell.style.cssText = 'width:' + cs + 'px;height:' + cs + 'px;border-radius:8px;background:#f0dcc8;box-shadow:0 2px 0 #e4ccb4;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;';
       (function(rr, cc) {
         cell.addEventListener('click', function() { pgClick(rr, cc); });
       })(r, c);
-      grid.appendChild(cell);
+      gridEl.appendChild(cell);
     }
   }
+  pg.appendChild(gridEl);
+  pgCellSize = cs;
+  pgDotSize = ds;
 }
 
 function pgClick(r, c) {
@@ -1428,7 +1449,8 @@ function pgUpdateCell(r, c) {
   var el = document.getElementById('pg-' + r + '-' + c);
   if (!el) return;
   var owner = pgBoard[r][c].owner, dots = pgBoard[r][c].dots;
-  el.style.background = ''; el.style.boxShadow = '';
+  el.style.background = '#f0dcc8';
+  el.style.boxShadow = '0 2px 0 #e4ccb4';
   el.title = '';
   if (owner >= 0 && dots > 0) {
     el.style.background = COLORS[0].dot;
@@ -1437,10 +1459,21 @@ function pgUpdateCell(r, c) {
   }
   el.innerHTML = '';
   if (dots > 0) {
-    var dc = buildDots(dots);
-    var allDots = dc.querySelectorAll('.dot');
-    for (var d = 0; d < allDots.length; d++) allDots[d].style.background = COLORS[0].dotCol;
-    el.appendChild(dc);
+    var ds = pgDotSize;
+    var dotColor = COLORS[0].dotCol;
+    var container = document.createElement('div');
+    container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:1px;pointer-events:none;';
+    function mkDot() {
+      var d = document.createElement('div');
+      d.style.cssText = 'width:' + ds + 'px;height:' + ds + 'px;border-radius:50%;background:' + dotColor + ';box-shadow:0 1px 3px rgba(0,0,0,0.15);';
+      return d;
+    }
+    function mkRow() { var r = document.createElement('div'); r.style.cssText = 'display:flex;gap:2px;justify-content:center;'; return r; }
+    if (dots === 1) { var row = mkRow(); row.appendChild(mkDot()); container.appendChild(row); }
+    else if (dots === 2) { var row = mkRow(); row.appendChild(mkDot()); row.appendChild(mkDot()); container.appendChild(row); }
+    else if (dots === 3) { var t = mkRow(); t.appendChild(mkDot()); container.appendChild(t); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
+    else { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var b = mkRow(); for (var i = 2; i < Math.min(dots, 6); i++) b.appendChild(mkDot()); container.appendChild(b); }
+    el.appendChild(container);
   }
 }
 
@@ -1457,6 +1490,9 @@ function pgProcessExplosions() {
   if (toExplode.length === 0) return;
   pgAnimating = true;
   var gen = pgGeneration;
+
+  // Collect explosion data
+  var explosions = [];
   for (var i = 0; i < toExplode.length; i++) {
     var r = toExplode[i][0], c = toExplode[i][1];
     var dirs = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
@@ -1465,6 +1501,7 @@ function pgProcessExplosions() {
       var nr = dirs[j][0], nc = dirs[j][1];
       if (nr >= 0 && nr < pgSize && nc >= 0 && nc < pgSize) neighbors.push([nr, nc]);
     }
+    explosions.push({ r: r, c: c, neighbors: neighbors });
     pgBoard[r][c].dots -= neighbors.length;
     if (pgBoard[r][c].dots <= 0) { pgBoard[r][c].dots = 0; pgBoard[r][c].owner = -1; }
     for (var j = 0; j < neighbors.length; j++) {
@@ -1472,12 +1509,48 @@ function pgProcessExplosions() {
       pgBoard[neighbors[j][0]][neighbors[j][1]].dots++;
     }
   }
+
+  // Render updated board
   pgUpdateAll();
+
+  // Animate flying dots
+  var grid = document.getElementById('pg-grid');
+  if (grid) {
+    for (var i = 0; i < explosions.length; i++) {
+      var ex = explosions[i];
+      for (var j = 0; j < ex.neighbors.length; j++) {
+        pgFlyDot(grid, ex.r, ex.c, ex.neighbors[j][0], ex.neighbors[j][1]);
+      }
+    }
+  }
+
   setTimeout(function() {
     if (gen !== pgGeneration) return;
     pgAnimating = false;
     pgProcessExplosions();
-  }, 280);
+  }, 300);
+}
+
+function pgFlyDot(grid, fr, fc, tr, tc) {
+  var fromEl = document.getElementById('pg-' + fr + '-' + fc);
+  var toEl = document.getElementById('pg-' + tr + '-' + tc);
+  if (!fromEl || !toEl || !grid) return;
+  var gR = grid.getBoundingClientRect();
+  var fR = fromEl.getBoundingClientRect();
+  var tR = toEl.getBoundingClientRect();
+  var fromX = fR.left + fR.width / 2 - gR.left;
+  var fromY = fR.top + fR.height / 2 - gR.top;
+  var toX = tR.left + tR.width / 2 - gR.left;
+  var toY = tR.top + tR.height / 2 - gR.top;
+  var ds = pgDotSize;
+  var dot = document.createElement('div');
+  dot.style.cssText = 'position:absolute;width:' + ds + 'px;height:' + ds + 'px;border-radius:50%;background:' + COLORS[0].dotCol + ';box-shadow:0 1px 3px rgba(0,0,0,0.15);z-index:20;pointer-events:none;transition:transform 0.28s cubic-bezier(0.22,0.61,0.36,1);left:' + (fromX - ds/2) + 'px;top:' + (fromY - ds/2) + 'px;';
+  grid.style.position = 'relative';
+  grid.appendChild(dot);
+  requestAnimationFrame(function() { requestAnimationFrame(function() {
+    dot.style.transform = 'translate(' + (toX - fromX) + 'px,' + (toY - fromY) + 'px) scale(0.7)';
+  }); });
+  setTimeout(function() { if (dot.parentNode) dot.remove(); }, 290);
 }
 
 function showLocalScreen() {
@@ -2381,7 +2454,7 @@ function demoRender() {
 }
 
 // Start demo on page load
-demoInit();
+// Demo initialized via DOMContentLoaded
 
 // ======== FIREBASE INIT ========
 var db = null;
@@ -2453,7 +2526,7 @@ function setUsername() {
   var inp = document.getElementById('uname-input');
   var name = inp.value.trim();
   if (!name || name.length < 1) return;
-  if (!db) { myUsername = name; localStorage.setItem('cr-username', myUsername); showUsername(myUsername); updateChatUsernameNotice(); prefillNames(); return; }
+  if (!db) { myUsername = name; localStorage.setItem('cr-username', myUsername); showUsername(myUsername); updateChatUsernameNotice(); loadChat(); prefillNames(); return; }
   // Check uniqueness
   db.ref('usernames/' + name.toLowerCase()).once('value', function(snap) {
     if (snap.exists() && snap.val() !== myUserId) {
@@ -2470,6 +2543,8 @@ function setUsername() {
     registerUsername(myUsername);
     showUsername(myUsername);
     updateChatUsernameNotice();
+    loadChat();
+    if (!chatInitialized) { listenChat('global'); chatInitialized = true; }
     // Pre-fill online name inputs
     var ci = document.getElementById('ol-create-name');
     if (ci && !ci.value) ci.value = myUsername;
@@ -2557,7 +2632,8 @@ function sendChat() {
 }
 
 function loadChat() {
-  var container = document.getElementById('chat-messages');
+  var container = $('chat-messages');
+  if (!container) return;
   if (!db) { container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Chat unavailable — Firebase not loaded</div>'; return; }
   container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Loading…</div>';
 
@@ -2566,7 +2642,9 @@ function loadChat() {
     if (chatListeners[key]) chatListeners[key]();
   }
 
-  var ref = getChatRef().orderByChild('timestamp').limitToLast(100);
+  var chatRef = getChatRef();
+  if (!chatRef) return;
+  var ref = chatRef.orderByChild('timestamp').limitToLast(100);
   var handler = ref.on('value', function(snap) {
     container.innerHTML = '';
     if (!snap.exists()) {
@@ -2747,12 +2825,14 @@ function prefillNames() {
   if (ji && !ji.value && myUsername) ji.value = myUsername;
 }
 
-// Initialize username on page load
-initUsername();
-prefillNames();
-try { initChat(); } catch(e) { console.warn('Chat init failed:', e); }
-
-// Load public rooms on main menu
+// Defer initialization until DOM is ready
+window.addEventListener('DOMContentLoaded', function() {
+  try { initUsername(); } catch(e) {}
+  try { prefillNames(); } catch(e) {}
+  try { initChat(); } catch(e) {}
+  try { loadMainPublicRooms(); } catch(e) {}
+  try { demoInit(); } catch(e) {}
+});
 var mainPubSubbed = false;
 function loadMainPublicRooms() {
   var list = document.getElementById('main-pub-list');
@@ -2798,7 +2878,7 @@ function loadMainPublicRooms() {
     }
   });
 }
-try { loadMainPublicRooms(); } catch(e) { console.warn('Could not load public rooms:', e); }
+// Public rooms loaded via DOMContentLoaded
 </script>
 
 <!-- ONLINE PANELS -->
