@@ -2543,14 +2543,35 @@ function setUsername() {
     registerUsername(myUsername);
     showUsername(myUsername);
     updateChatUsernameNotice();
+    updateOldMessages(myUsername);
     loadChat();
-    if (!chatInitialized) { listenChat('global'); chatInitialized = true; }
+    if (!chatInitialized) { chatInitialized = true; }
     // Pre-fill online name inputs
     var ci = document.getElementById('ol-create-name');
     if (ci && !ci.value) ci.value = myUsername;
     var ji = document.getElementById('ol-join-name');
     if (ji && !ji.value) ji.value = myUsername;
   });
+}
+
+function updateOldMessages(newName) {
+  if (!db) return;
+  // Update global chat messages
+  db.ref('chat/global').orderByChild('userId').equalTo(myUserId).once('value', function(snap) {
+    if (!snap.exists()) return;
+    var updates = {};
+    snap.forEach(function(child) { updates[child.key + '/username'] = newName; });
+    db.ref('chat/global').update(updates);
+  });
+  // Update room chat messages if in a room
+  if (roomCode) {
+    db.ref('chat/rooms/' + roomCode).orderByChild('userId').equalTo(myUserId).once('value', function(snap) {
+      if (!snap.exists()) return;
+      var updates = {};
+      snap.forEach(function(child) { updates[child.key + '/username'] = newName; });
+      db.ref('chat/rooms/' + roomCode).update(updates);
+    });
+  }
 }
 
 function registerUsername(name) {
@@ -2561,22 +2582,20 @@ function registerUsername(name) {
 
 // ======== CHAT SYSTEM ========
 var chatTab = 'global';
-var chatListeners = {};
 var chatInitialized = false;
+var activeChatRef = null;
+var activeChatHandler = null;
 
 function initChat() {
   chatInitialized = true;
-  loadChat();
-  listenChat('global');
   updateChatUsernameNotice();
+  attachChatListener();
 }
 
 function updateChatUsernameNotice() {
-  var notice = document.getElementById('chat-username-notice');
-  if (notice) {
-    notice.style.display = myUsername ? 'none' : '';
-  }
-  var inp = document.getElementById('chat-input');
+  var notice = $('chat-username-notice');
+  if (notice) notice.style.display = myUsername ? 'none' : '';
+  var inp = $('chat-input');
   if (inp) {
     inp.disabled = !myUsername;
     inp.placeholder = myUsername ? 'Type a message…' : 'Set a username first';
@@ -2585,27 +2604,70 @@ function updateChatUsernameNotice() {
 
 function switchChatTab(tab) {
   chatTab = tab;
-  document.getElementById('tab-global').className = 'chat-tab' + (tab === 'global' ? ' active' : '');
-  document.getElementById('tab-room').className = 'chat-tab' + (tab === 'room' ? ' active' : '');
-  loadChat();
+  var tg = $('tab-global'); if (tg) tg.className = 'chat-tab' + (tab === 'global' ? ' active' : '');
+  var tr = $('tab-room'); if (tr) tr.className = 'chat-tab' + (tab === 'room' ? ' active' : '');
+  attachChatListener();
 }
 
 function showRoomChatTab(show) {
-  var tab = document.getElementById('tab-room');
+  var tab = $('tab-room');
   if (tab) tab.style.display = show ? '' : 'none';
   if (!show && chatTab === 'room') switchChatTab('global');
 }
 
 function getChatRef() {
   if (!db) return null;
-  if (chatTab === 'room' && roomCode) {
-    return db.ref('chat/rooms/' + roomCode);
-  }
+  if (chatTab === 'room' && roomCode) return db.ref('chat/rooms/' + roomCode);
   return db.ref('chat/global');
 }
 
+function detachChatListener() {
+  if (activeChatRef && activeChatHandler) {
+    try { activeChatRef.off('value', activeChatHandler); } catch(e) {}
+  }
+  activeChatRef = null;
+  activeChatHandler = null;
+}
+
+function attachChatListener() {
+  detachChatListener();
+  var container = $('chat-messages');
+  if (!container) return;
+  if (!db) {
+    container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Chat unavailable</div>';
+    return;
+  }
+  container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Loading…</div>';
+  var ref = getChatRef();
+  if (!ref) return;
+  var query = ref.orderByChild('timestamp').limitToLast(100);
+  activeChatRef = query;
+  activeChatHandler = query.on('value', function(snap) {
+    var c = $('chat-messages');
+    if (!c) return;
+    c.innerHTML = '';
+    if (!snap.exists()) {
+      c.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">No messages yet</div>';
+      return;
+    }
+    var msgs = [];
+    snap.forEach(function(child) { msgs.push(child.val()); });
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      var div = document.createElement('div');
+      div.className = 'chat-msg';
+      var time = m.timestamp ? new Date(m.timestamp) : new Date();
+      var timeStr = time.getHours().toString().padStart(2, '0') + ':' + time.getMinutes().toString().padStart(2, '0');
+      div.innerHTML = '<span class="msg-name">' + escHtml(m.username || 'Anon') + '</span><span class="msg-time">' + timeStr + '</span><div class="msg-text">' + escHtml(m.text) + '</div>';
+      c.appendChild(div);
+    }
+    c.scrollTop = c.scrollHeight;
+  });
+}
+
 function sendChat() {
-  var inp = document.getElementById('chat-input');
+  var inp = $('chat-input');
+  if (!inp) return;
   var text = inp.value.trim();
   if (!myUsername) { updateChatUsernameNotice(); return; }
   if (!text) return;
@@ -2618,63 +2680,19 @@ function sendChat() {
     timestamp: firebase.database.ServerValue.TIMESTAMP
   });
   inp.value = '';
-  // Trim to last 100 messages
+  // Trim to last 100
   ref.orderByChild('timestamp').once('value', function(snap) {
     var keys = [];
     snap.forEach(function(child) { keys.push(child.key); });
     if (keys.length > 100) {
-      var toDelete = keys.slice(0, keys.length - 100);
       var updates = {};
-      for (var i = 0; i < toDelete.length; i++) updates[toDelete[i]] = null;
+      for (var i = 0; i < keys.length - 100; i++) updates[keys[i]] = null;
       ref.update(updates);
     }
   });
 }
 
-function loadChat() {
-  var container = $('chat-messages');
-  if (!container) return;
-  if (!db) { container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Chat unavailable — Firebase not loaded</div>'; return; }
-  container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Loading…</div>';
-
-  // Detach old listeners
-  for (var key in chatListeners) {
-    if (chatListeners[key]) chatListeners[key]();
-  }
-
-  var chatRef = getChatRef();
-  if (!chatRef) return;
-  var ref = chatRef.orderByChild('timestamp').limitToLast(100);
-  var handler = ref.on('value', function(snap) {
-    container.innerHTML = '';
-    if (!snap.exists()) {
-      container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">No messages yet</div>';
-      return;
-    }
-    var msgs = [];
-    snap.forEach(function(child) { msgs.push(child.val()); });
-    for (var i = 0; i < msgs.length; i++) {
-      var m = msgs[i];
-      var div = document.createElement('div');
-      div.className = 'chat-msg';
-      var time = m.timestamp ? new Date(m.timestamp) : new Date();
-      var timeStr = time.getHours().toString().padStart(2,'0') + ':' + time.getMinutes().toString().padStart(2,'0');
-      div.innerHTML = '<span class="msg-name">' + escHtml(m.username || 'Anon') + '</span><span class="msg-time">' + timeStr + '</span><div class="msg-text">' + escHtml(m.text) + '</div>';
-      container.appendChild(div);
-    }
-    container.scrollTop = container.scrollHeight;
-  });
-
-  chatListeners[chatTab] = function() { ref.off('value', handler); };
-}
-
-function listenChat(tab) {
-  if (!db) return;
-  var ref = (tab === 'room' && roomCode) ? db.ref('chat/rooms/' + roomCode) : db.ref('chat/global');
-  ref.orderByChild('timestamp').limitToLast(1).on('child_added', function() {
-    if (chatTab === tab) loadChat();
-  });
-}
+function loadChat() { attachChatListener(); }
 
 function escHtml(s) {
   var d = document.createElement('div');
@@ -2682,10 +2700,7 @@ function escHtml(s) {
   return d.innerHTML;
 }
 
-// Start listening for room chat when joining a room
-function startRoomChatListener() {
-  if (roomCode) listenChat('room');
-}
+function startRoomChatListener() {}
 
 // ======== SPECTATOR SYSTEM ========
 var isSpectator = false;
