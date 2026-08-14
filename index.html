@@ -50,7 +50,7 @@
     font-size: 11px; font-weight: 700;
     padding: 6px 14px 5px; border-radius: 14px; min-width: 52px;
     background: var(--ui-bg); color: var(--text-dark); opacity: 1;
-    transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   }
   .player-tag .tag-top { display: flex; align-items: center; gap: 4px; }
   .player-tag .pip { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
@@ -957,11 +957,17 @@ function applyCellSize() {
   else if (SIZE <= 12) { cs = 40; ds = 12; g = 3; }
   else if (SIZE <= 15) { cs = 36; ds = 11; g = 3; }
   else if (SIZE <= 20) { cs = 34; ds = 10; g = 5; }
-  else { cs = 34; ds = 10; g = 5; }
+  else { cs = 28; ds = 8; g = 4; }
   document.documentElement.style.setProperty('--cell', cs + 'px');
   document.documentElement.style.setProperty('--dot-size', ds + 'px');
   document.documentElement.style.setProperty('--gap', g + 'px');
-  document.body.style.paddingLeft = SIZE >= 30 ? '30rem' : '5rem';
+  document.body.style.paddingLeft = SIZE >= 30 ? '0' : '5rem';
+  // Allow horizontal scroll for large grids on mobile
+  var gw = $('grid-wrap');
+  if (gw) {
+    if (SIZE >= 20) { gw.style.overflowX = 'auto'; gw.style.maxWidth = '100vw'; gw.style.webkitOverflowScrolling = 'touch'; }
+    else { gw.style.overflowX = ''; gw.style.maxWidth = ''; }
+  }
 }
 
 function renderGrid() {
@@ -1004,7 +1010,10 @@ function renderPlayerBar() {
   for (var k = 0; k < order.length; k++) {
     var i = order[k];
     var tag = document.createElement('div');
-    tag.className = 'player-tag';
+    var cls = 'player-tag';
+    if (i === turn) cls += ' active';
+    if (!alive[i]) cls += ' dead';
+    tag.className = cls;
     tag.id = 'ptag-' + i;
 
     var top = document.createElement('div');
@@ -1049,9 +1058,13 @@ function renderPlayerBar() {
 }
 
 function updateCounts() {
-  if (sortBySquares) { renderPlayerBar(); updateUI(); return; }
   var counts = getCounts();
   var dotCounts = getDotCounts();
+  if (sortBySquares) {
+    // Re-render but with classes applied immediately
+    renderPlayerBar();
+    return;
+  }
   for (var i = 0; i < NUM_PLAYERS; i++) {
     var el = document.getElementById('cnt-' + i);
     if (el) el.textContent = counts[i] + ' ■  ' + dotCounts[i] + ' ●';
@@ -2113,8 +2126,11 @@ function olExecuteMove(r, c, cb) {
 }
 
 function olAdvanceTurn() {
+  var prevTurn = turn;
   var tries = 0;
   do { turn = (turn + 1) % NUM_PLAYERS; tries++; } while (!alive[turn] && tries <= NUM_PLAYERS);
+  moveNum++;
+  if (turn <= prevTurn) roundNum++;
   updateOLUI();
   olScheduleAI();
 }
@@ -2269,6 +2285,8 @@ function updateOLUI() {
     else if (isMine) label.textContent = 'Your turn';
     else label.textContent = PN(turn) + "'s turn";
   }
+  var rl = $('round-label');
+  if (rl) rl.textContent = 'Round ' + roundNum;
 }
 
 // ======== DEMO GAME ON MAIN MENU ========
@@ -2729,6 +2747,10 @@ olJoinRoom = function() {
     setDisplay('ol-lob-host', 'none');
     setDisplay('ol-lob-guest', '');
     startRoomChatListener();
+    // Request game state in case game is already running
+    setTimeout(function() {
+      if (channel) channel.publish('requestsync', {});
+    }, 1000);
   });
 };
 
@@ -2774,6 +2796,7 @@ function onSyncReceived(msg) {
   var d = msg.data;
   if (!d.gameStarted) return;
   isSpectator = true;
+  gameStarted = true;
   gameMode = 'online';
   SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs; NUM_HUMANS = d.numHumans;
   board = d.board; turn = d.turn; placed = d.placed; alive = d.alive;
@@ -2796,16 +2819,19 @@ updateOLLobby = function() {
   channel.presence.get(function(err, members) {
     if (err) return;
     onlinePlayers = members.map(function(m) { return { clientId: m.clientId, name: m.data.name, host: m.data.host, spectator: m.data.spectator }; });
-    var list = document.getElementById('ol-lob-list'); list.innerHTML = '';
-    for (var i = 0; i < onlinePlayers.length; i++) {
-      var div = document.createElement('div');
-      var pip = document.createElement('div'); pip.className = 'lpip'; pip.style.background = COLORS[i % COLORS.length].dot;
-      div.appendChild(pip);
-      var txt = onlinePlayers[i].name;
-      if (onlinePlayers[i].host) txt += ' (host)';
-      if (onlinePlayers[i].clientId === myClientId) txt += ' — you';
-      div.appendChild(document.createTextNode(txt));
-      list.appendChild(div);
+    var list = document.getElementById('ol-lob-list');
+    if (list) {
+      list.innerHTML = '';
+      for (var i = 0; i < onlinePlayers.length; i++) {
+        var div = document.createElement('div');
+        var pip = document.createElement('div'); pip.className = 'lpip'; pip.style.background = COLORS[i % COLORS.length].dot;
+        div.appendChild(pip);
+        var txt = onlinePlayers[i].name;
+        if (onlinePlayers[i].host) txt += ' (host)';
+        if (onlinePlayers[i].clientId === myClientId) txt += ' — you';
+        div.appendChild(document.createTextNode(txt));
+        list.appendChild(div);
+      }
     }
     if (isHost) {
       var total = onlinePlayers.length + olAIs;
@@ -2817,6 +2843,16 @@ updateOLLobby = function() {
     } else {
       document.getElementById('ol-lob-info').textContent = onlinePlayers.length + ' players in room';
     }
+    // If host and game is running, auto-send sync for any new joiners
+    if (isHost && gameStarted && board && channel) {
+      channel.publish('sync', {
+        board: board, turn: turn, placed: placed, alive: alive,
+        size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, numHumans: NUM_HUMANS,
+        colorMap: colorMap, playerNames: playerNames,
+        roundNum: roundNum, elimOrder: elimOrder, elimInfo: elimInfo, killCounts: killCounts,
+        gameStarted: true
+      });
+    }
   });
 };
 
@@ -2827,9 +2863,12 @@ var _origOnOLStart = onOLStart;
 var _origOnOLNewGame = onOLNewGame;
 onOLNewGame = function() {
   isSpectator = false;
-  _origOnOLNewGame();
-  // Request new setup from host
-  if (!isHost && channel) channel.publish('requestsync', {});
+  gameStarted = true;
+  var _ov = $('overlay'); if (_ov) _ov.style.display = 'none';
+  var _dp = $('death-panel'); if (_dp) _dp.style.display = 'none';
+  initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
+  moveQueue = []; processing = false;
+  olScheduleAI();
 };
 
 // Pre-fill name inputs with username
@@ -2873,9 +2912,17 @@ function loadMainPublicRooms() {
             '<div class="mpr-code">' + d.roomCode + '</div>';
           (function(code) {
             row.onclick = function() {
-              var inp = document.getElementById('ol-join-code');
-              if (inp) inp.value = code;
-              showOLPanel('ol-join');
+              if (myUsername) {
+                // Join directly
+                var inp = document.getElementById('ol-join-code');
+                if (inp) inp.value = code;
+                olJoinRoom();
+              } else {
+                // Need username first, show join panel
+                var inp = document.getElementById('ol-join-code');
+                if (inp) inp.value = code;
+                showOLPanel('ol-join');
+              }
             };
           })(d.roomCode);
           list.appendChild(row);
