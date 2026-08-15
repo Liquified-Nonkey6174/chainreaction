@@ -869,6 +869,10 @@ function confirmColours() {
     if (colorMap[i] < 0) return; // can't start yet
   }
   assignAIColours();
+  // Set AI names to match their actual assigned colours
+  for (var i = NUM_HUMANS; i < NUM_PLAYERS; i++) {
+    playerNames[i] = PC(i).name + ' AI';
+  }
   setDisplay('cp-panel', 'none');
   startGameWithColours();
 }
@@ -1727,7 +1731,7 @@ function olEnterLobby() {
   });
 }
 
-function olUpdateLobbyPresence(count) {
+function olUpdateLobbyPresence(count, inProgress) {
   if (!lobbyChannel || olVisibility !== 'public') return;
   lobbyChannel.presence.update({
     roomCode: roomCode,
@@ -1735,7 +1739,8 @@ function olUpdateLobbyPresence(count) {
     size: olSize,
     humans: olHumans,
     ais: olAIs,
-    playerCount: count
+    playerCount: count,
+    inProgress: !!inProgress
   });
 }
 
@@ -2060,7 +2065,7 @@ function olConfirmColours() {
 
 function onOLStart(msg) {
   var d = msg.data;
-  olLeaveLobbyChannel();
+  olUpdateLobbyPresence(onlinePlayers.length, true);
   gameStarted = true;
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
   NUM_HUMANS = NUM_PLAYERS - NUM_AIS;
@@ -2749,8 +2754,14 @@ olJoinRoom = function() {
     startRoomChatListener();
     // Request game state in case game is already running
     setTimeout(function() {
-      if (channel) channel.publish('requestsync', {});
-    }, 1000);
+      if (channel && channel.state === 'attached') {
+        channel.publish('requestsync', {});
+      } else if (channel) {
+        channel.once('attached', function() {
+          channel.publish('requestsync', {});
+        });
+      }
+    }, 1500);
   });
 };
 
@@ -2771,7 +2782,7 @@ olCreateRoom = function() {
     channel.subscribe('newgame', onOLNewGame);
     channel.subscribe('sync', onSyncReceived);
     channel.subscribe('requestsync', function() {
-      if (isHost && board) {
+      if (isHost && gameStarted && board) {
         channel.publish('sync', {
           board: board, turn: turn, placed: placed, alive: alive,
           size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, numHumans: NUM_HUMANS,
@@ -2792,7 +2803,8 @@ olCreateRoom = function() {
 };
 
 function onSyncReceived(msg) {
-  if (isHost) return; // host doesn't need sync
+  if (isHost) return;
+  if (gameStarted && !isSpectator) return; // already playing, ignore sync
   var d = msg.data;
   if (!d.gameStarted) return;
   isSpectator = true;
@@ -2824,7 +2836,9 @@ updateOLLobby = function() {
       list.innerHTML = '';
       for (var i = 0; i < onlinePlayers.length; i++) {
         var div = document.createElement('div');
-        var pip = document.createElement('div'); pip.className = 'lpip'; pip.style.background = COLORS[i % COLORS.length].dot;
+        var pip = document.createElement('div'); pip.className = 'lpip';
+        var lobbyColorIdx = (i * 7) % COLORS.length; // spread colors apart
+        pip.style.background = COLORS[lobbyColorIdx].dot;
         div.appendChild(pip);
         var txt = onlinePlayers[i].name;
         if (onlinePlayers[i].host) txt += ' (host)';
@@ -2842,16 +2856,6 @@ updateOLLobby = function() {
       olUpdateLobbyPresence(onlinePlayers.length);
     } else {
       document.getElementById('ol-lob-info').textContent = onlinePlayers.length + ' players in room';
-    }
-    // If host and game is running, auto-send sync for any new joiners
-    if (isHost && gameStarted && board && channel) {
-      channel.publish('sync', {
-        board: board, turn: turn, placed: placed, alive: alive,
-        size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, numHumans: NUM_HUMANS,
-        colorMap: colorMap, playerNames: playerNames,
-        roundNum: roundNum, elimOrder: elimOrder, elimInfo: elimInfo, killCounts: killCounts,
-        gameStarted: true
-      });
     }
   });
 };
@@ -2906,7 +2910,9 @@ function loadMainPublicRooms() {
           count++;
           var row = document.createElement('div');
           row.className = 'main-pub-room';
-          row.innerHTML = '<div class="mpr-info"><div class="mpr-host">' + escHtml(d.hostName || 'Host') + '\'s room</div>' +
+          row.innerHTML = '<div class="mpr-info"><div class="mpr-host">' + escHtml(d.hostName || 'Host') + '\'s room' +
+            (d.inProgress ? ' <span style="font-size:10px;background:rgba(255,255,255,0.3);padding:1px 6px;border-radius:8px;font-weight:500;">In Progress</span>' : '') +
+            '</div>' +
             '<div class="mpr-details">' + d.size + '×' + d.size + ' · ' + d.humans + 'H' +
             (d.ais > 0 ? ' + ' + d.ais + 'AI' : '') + ' · ' + (d.playerCount || 1) + ' in</div></div>' +
             '<div class="mpr-code">' + d.roomCode + '</div>';
