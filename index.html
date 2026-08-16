@@ -422,6 +422,7 @@
 
 <h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Chain Reaction</h1>
 
+<div id="local-settings">
 <div class="row">
   <span class="label">Humans:</span>
   <div id="player-btns" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;"></div>
@@ -438,11 +439,13 @@
 <div class="row" style="margin-top:0.3rem;">
   <button class="btn" onclick="resetGame()" style="padding:10px 28px;font-size:14px;font-weight:700;background:rgba(255,255,255,0.35);">Start game</button>
 </div>
+</div>
 
 <div class="online-info" id="online-info" style="display:none;"></div>
 
 <div class="row sort-btn">
   <button class="btn" id="sort-btn" onclick="toggleSort()">Sort by squares</button>
+  <button class="btn" id="forfeit-btn" onclick="forfeit()" style="margin-left:4px;background:rgba(239,123,123,0.3);">Forfeit</button>
 </div>
 <div class="player-bar" id="player-bar"></div>
 <div class="turn-label" id="turn-label"></div>
@@ -613,7 +616,8 @@ var gameGeneration = 0;
 var gameStarted = false;
 var isAIPlayer = []; // per-player AI flag, survives shuffling
 var randomizeEnabled = false;
-var turnQueue = []; // queue of player indices for current round
+var turnQueue = [];
+var currentRoundOrder = []; // full order for display purposes
 function PC(i) { var ci = colorMap[i]; return ci >= 0 ? COLORS[ci] : { name:'?', dot:'#999', shadow:'#666', dotCol:'#fff' }; }
 function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
 function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
@@ -701,16 +705,18 @@ function buildTurnQueue() {
   for (var i = 0; i < NUM_PLAYERS; i++) {
     if (alive[i]) turnQueue.push(i);
   }
-  if (randomizeEnabled) {
+  if (randomizeEnabled && (gameMode !== 'online' || isHost)) {
+    // Only shuffle locally for local games, or if we're the host in online
     for (var i = turnQueue.length - 1; i > 0; i--) {
       var j = Math.floor(Math.random() * (i + 1));
       var tmp = turnQueue[i]; turnQueue[i] = turnQueue[j]; turnQueue[j] = tmp;
     }
   }
-  // In online mode, host broadcasts the queue so everyone is in sync
+  // In online mode, host broadcasts the queue so everyone uses the same order
   if (gameMode === 'online' && isHost && channel && randomizeEnabled) {
     channel.publish('turnorder', { queue: turnQueue.slice() });
   }
+  currentRoundOrder = turnQueue.slice();
 }
 
 function isAI(p) { return isAIPlayer[p] || false; }
@@ -962,12 +968,14 @@ function renderSideLB() {
       var roundEl = document.createElement('span');
       roundEl.className = 'lb-round';
       if (info && info.isWinner) roundEl.textContent = '—';
+      else if (info && info.isForfeit) roundEl.textContent = 'R' + info.round;
       else if (info) roundEl.textContent = 'R' + info.round;
       row.appendChild(roundEl);
 
       var killerEl = document.createElement('span');
       killerEl.className = 'lb-killer';
       if (info && info.isWinner) killerEl.textContent = 'Winner';
+      else if (info && info.isForfeit) killerEl.textContent = 'Forfeit';
       else if (info && info.killedBy >= 0 && info.killedBy !== pi) killerEl.textContent = PN(info.killedBy);
       else killerEl.textContent = '—';
       row.appendChild(killerEl);
@@ -1053,9 +1061,21 @@ function renderPlayerBar() {
   var counts = getCounts();
   var dotCounts = getDotCounts();
   var order = [];
-  for (var i = 0; i < NUM_PLAYERS; i++) order.push(i);
   if (sortBySquares) {
+    for (var i = 0; i < NUM_PLAYERS; i++) order.push(i);
     order.sort(function(a, b) { return counts[b] - counts[a]; });
+  } else if (randomizeEnabled && currentRoundOrder.length > 0) {
+    // Show in current round's turn order, then dead players at the end
+    var inOrder = {};
+    for (var i = 0; i < currentRoundOrder.length; i++) {
+      order.push(currentRoundOrder[i]);
+      inOrder[currentRoundOrder[i]] = true;
+    }
+    for (var i = 0; i < NUM_PLAYERS; i++) {
+      if (!inOrder[i]) order.push(i); // dead players
+    }
+  } else {
+    for (var i = 0; i < NUM_PLAYERS; i++) order.push(i);
   }
   for (var k = 0; k < order.length; k++) {
     var i = order[k];
@@ -1222,6 +1242,60 @@ function handleClick(r, c) {
 }
 
 var startPromptTimeout = null;
+
+// ======== FORFEIT SYSTEM ========
+function forfeit() {
+  if (gameMode === 'online') {
+    if (mySlot < 0 || !alive[mySlot]) return;
+    if (!confirm('Forfeit? Your squares will be cleared.')) return;
+    channel.publish('move', { forfeit: true, player: mySlot });
+  } else {
+    // Local: forfeit current human player
+    if (isAI(turn) || !alive[turn]) return;
+    if (!confirm(PN(turn) + ' forfeits? Their squares will be cleared.')) return;
+    executeForfeit(turn);
+  }
+}
+
+function executeForfeit(p) {
+  if (!alive[p]) return;
+  // Clear all squares owned by this player
+  for (var r = 0; r < SIZE; r++) {
+    for (var c = 0; c < SIZE; c++) {
+      if (board[r][c].owner === p) {
+        board[r][c].owner = -1;
+        board[r][c].dots = 0;
+      }
+    }
+  }
+  alive[p] = false;
+  placed[p] = true;
+  elimOrder.push(p);
+  elimInfo[p] = { round: roundNum, killedBy: -1, isForfeit: true };
+  // Remove from turn queue
+  turnQueue = turnQueue.filter(function(idx) { return idx !== p; });
+  updateAllCells(); updateCounts();
+  renderSideLB(); renderPlayerBar();
+  // Check win
+  var aliveCount = 0, winner = -1;
+  for (var i = 0; i < NUM_PLAYERS; i++) if (alive[i]) { aliveCount++; winner = i; }
+  if (aliveCount === 1) {
+    alive[winner] = false;
+    elimOrder.push(winner);
+    elimInfo[winner] = { round: roundNum, killedBy: -1, isWinner: true };
+    renderSideLB(); renderPlayerBar();
+    if (gameMode === 'online') olShowWin(winner);
+    else showWin(winner);
+    return;
+  }
+  if (aliveCount === 0) return;
+  // Advance turn if forfeiter was current
+  if (turn === p) {
+    if (gameMode === 'online') olAdvanceTurn();
+    else advanceTurn();
+  }
+}
+
 function showStartPrompt() {
   var existing = document.getElementById('start-prompt');
   if (existing) existing.remove();
@@ -1272,6 +1346,7 @@ function advanceTurn() {
   if (turnQueue.length > 0) {
     turn = turnQueue.shift();
   }
+  renderPlayerBar();
   updateUI();
   if (isAI(turn) && alive[turn]) setTimeout(aiMove, SIZE >= 20 ? 80 : 350);
 }
@@ -1376,7 +1451,7 @@ function showWin(p) {
     var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
     var info = elimInfo[pi];
     var detail = '';
-    if (info && info.isWinner) detail = 'Winner!';
+    if (info && info.isWinner) detail = 'Winner!'; else if (info && info.isForfeit) detail = 'Forfeit';
     else if (info) { detail = 'R' + info.round; if (info.killedBy >= 0 && info.killedBy !== pi) detail += ', by ' + PN(info.killedBy); }
     lb += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><span style="font-weight:700;min-width:20px;">' + medal + '</span><span style="width:8px;height:8px;border-radius:50%;background:'+PC(pi).dot+';display:inline-block;"></span> ' + PN(pi) + (detail ? '<span style="font-size:10px;opacity:0.5;margin-left:auto;">' + detail + '</span>' : '') + '</div>';
   }
@@ -1631,21 +1706,6 @@ function showLocalScreen() {
   initBoard(); applyCellSize(); renderGrid();
 }
 
-function goMainMenu() {
-  var ls = document.getElementById('local-screen'); if (ls) ls.style.display = 'none';
-  var pg = document.getElementById('playground-screen'); if (pg) pg.style.display = 'none';
-  var mm = document.getElementById('main-menu'); if (mm) mm.style.display = '';
-  var ov = document.getElementById('overlay'); if (ov) ov.style.display = 'none';
-  var dp = document.getElementById('death-panel'); if (dp) dp.style.display = 'none';
-  var oi = document.getElementById('online-info'); if (oi) oi.style.display = 'none';
-  hideOLPanels();
-  showRoomChatTab(false);
-  playgroundMode = false;
-  gameMode = 'local';
-  animating = false;
-  gameGeneration++;
-}
-
 function startPlayground() {
   playgroundMode = true;
   gameMode = 'local';
@@ -1659,6 +1719,7 @@ function startPlayground() {
 
 function goMainMenu() {
   var ls = document.getElementById('local-screen'); if (ls) ls.style.display = 'none';
+  setDisplay('local-settings', '');
   var pg = document.getElementById('playground-screen'); if (pg) pg.style.display = 'none';
   var mm = document.getElementById('main-menu'); if (mm) mm.style.display = '';
   var ov = document.getElementById('overlay'); if (ov) ov.style.display = 'none';
@@ -2166,6 +2227,7 @@ function onOLStart(msg) {
   hideOLPanels();
   setDisplay('main-menu', 'none');
   setDisplay('local-screen', '');
+  setDisplay('local-settings', 'none');
   setDisplay('online-info', '');
   document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
@@ -2185,6 +2247,10 @@ function onOLMove(msg) { moveQueue.push(msg.data); olProcessQueue(); }
 function olProcessQueue() {
   if (processing || !moveQueue.length) return;
   processing = true; var m = moveQueue.shift();
+  if (m.forfeit) {
+    executeForfeit(m.player);
+    processing = false; olProcessQueue(); return;
+  }
   if (m.player !== turn) { processing = false; olProcessQueue(); return; }
   olExecuteMove(m.r, m.c, function() { processing = false; olProcessQueue(); });
 }
@@ -2220,6 +2286,7 @@ function olAdvanceTurn() {
   if (turnQueue.length > 0) {
     turn = turnQueue.shift();
   }
+  renderPlayerBar();
   updateOLUI();
   olScheduleAI();
 }
@@ -2286,7 +2353,7 @@ function olShowWin(p) {
     var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
     var info = elimInfo[pi];
     var detail = '';
-    if (info && info.isWinner) detail = 'Winner!';
+    if (info && info.isWinner) detail = 'Winner!'; else if (info && info.isForfeit) detail = 'Forfeit';
     else if (info) { detail = 'R' + info.round; if (info.killedBy >= 0 && info.killedBy !== pi) detail += ', by ' + PN(info.killedBy); }
     lb += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><span style="font-weight:700;min-width:20px;">' + medal + '</span><span style="width:8px;height:8px;border-radius:50%;background:'+PC(pi).dot+';display:inline-block;"></span> ' + PN(pi) + (detail ? '<span style="font-size:10px;opacity:0.5;margin-left:auto;">' + detail + '</span>' : '') + '</div>';
   }
@@ -2831,7 +2898,12 @@ olJoinRoom = function() {
     channel.subscribe('newgame', onOLNewGame);
     channel.subscribe('sync', onSyncReceived);
     channel.subscribe('turnorder', function(msg) {
-      if (!isHost && msg.data && msg.data.queue) { turnQueue = msg.data.queue; if (turnQueue.length > 0) turn = turnQueue.shift(); updateUI(); }
+      if (!isHost && msg.data && msg.data.queue) {
+        turnQueue = msg.data.queue;
+        currentRoundOrder = turnQueue.slice();
+        if (turnQueue.length > 0) turn = turnQueue.shift();
+        renderPlayerBar(); updateUI();
+      }
     });
     showOLPanel('ol-lobby');
     showRoomChatTab(true);
@@ -2907,6 +2979,7 @@ function onSyncReceived(msg) {
   hideOLPanels();
   setDisplay('main-menu', 'none');
   setDisplay('local-screen', '');
+  setDisplay('local-settings', 'none');
   setDisplay('online-info', '');
   document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectator</span> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
