@@ -497,8 +497,14 @@
     <div id="cp-players"></div>
     <div style="margin-top:0.8rem;">
       <button class="mbtn primary" onclick="confirmColours()" id="cp-start-btn">0 players need colour</button>
-      <button class="mbtn secondary" onclick="randomiseColours()">Randomise</button>
+      <button class="mbtn secondary" onclick="randomiseColours()">Randomise colours</button>
       <button class="mbtn secondary" onclick="cancelColourPicker()">Cancel</button>
+    </div>
+    <div style="margin-top:0.5rem;">
+      <label style="font-size:12px;color:#999;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+        <input type="checkbox" id="cp-randomize-order"> Randomize turn order
+      </label>
+    </div>
     </div>
   </div>
 </div>
@@ -605,6 +611,9 @@ var moveNum = 0;
 var playgroundMode = false;
 var gameGeneration = 0;
 var gameStarted = false;
+var isAIPlayer = []; // per-player AI flag, survives shuffling
+var randomizeEnabled = false;
+var turnQueue = []; // queue of player indices for current round
 function PC(i) { var ci = colorMap[i]; return ci >= 0 ? COLORS[ci] : { name:'?', dot:'#999', shadow:'#666', dotCol:'#fff' }; }
 function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
 function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
@@ -677,14 +686,34 @@ function initBoard() {
     board[r] = [];
     for (var c = 0; c < SIZE; c++) board[r][c] = { owner: -1, dots: 0 };
   }
-  turn = 0;
   placed = []; alive = []; elimOrder = []; elimInfo = {}; killCounts = [];
-  roundNum = 0; moveNum = 0;  for (var i = 0; i < NUM_PLAYERS; i++) { placed.push(false); alive.push(true); killCounts.push(0); }
+  roundNum = 0; moveNum = 0;
+  for (var i = 0; i < NUM_PLAYERS; i++) { placed.push(false); alive.push(true); killCounts.push(0); }
   animating = false;
   gameGeneration++;
+  // Build first turn queue
+  buildTurnQueue();
+  turn = turnQueue.length > 0 ? turnQueue.shift() : 0;
 }
 
-function isAI(p) { return p >= NUM_HUMANS; }
+function buildTurnQueue() {
+  turnQueue = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) {
+    if (alive[i]) turnQueue.push(i);
+  }
+  if (randomizeEnabled) {
+    for (var i = turnQueue.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = turnQueue[i]; turnQueue[i] = turnQueue[j]; turnQueue[j] = tmp;
+    }
+  }
+  // In online mode, host broadcasts the queue so everyone is in sync
+  if (gameMode === 'online' && isHost && channel && randomizeEnabled) {
+    channel.publish('turnorder', { queue: turnQueue.slice() });
+  }
+}
+
+function isAI(p) { return isAIPlayer[p] || false; }
 
 function getCounts() {
   var counts = [];
@@ -729,13 +758,12 @@ function startGameWithColours() {
 
 // ======== COLOUR PICKER ========
 function showColourPicker() {
-  // Set default names
   playerNames = [];
+  isAIPlayer = [];
   for (var i = 0; i < NUM_PLAYERS; i++) {
-    if (isAI(i)) playerNames.push(PC(i).name + ' AI');
-    else playerNames.push('Player ' + (i + 1));
+    if (i >= NUM_HUMANS) { playerNames.push('AI'); isAIPlayer.push(true); }
+    else { playerNames.push('Player ' + (i + 1)); isAIPlayer.push(false); }
   }
-  // Start everyone unselected (-1)
   for (var i = 0; i < NUM_PLAYERS; i++) colorMap[i] = -1;
   setDisplay('cp-panel', '');
   renderColourPicker();
@@ -864,14 +892,32 @@ function assignAIColours() {
 }
 
 function confirmColours() {
-  // Check all humans have picked
   for (var i = 0; i < NUM_HUMANS; i++) {
-    if (colorMap[i] < 0) return; // can't start yet
+    if (colorMap[i] < 0) return;
   }
   assignAIColours();
-  // Set AI names to match their actual assigned colours
-  for (var i = NUM_HUMANS; i < NUM_PLAYERS; i++) {
-    playerNames[i] = PC(i).name + ' AI';
+  for (var i = 0; i < NUM_PLAYERS; i++) {
+    if (isAIPlayer[i]) playerNames[i] = PC(i).name + ' AI';
+  }
+  // Set randomize flag for per-round shuffling
+  var cb = $('cp-randomize-order');
+  randomizeEnabled = cb && cb.checked;
+  if (randomizeEnabled) {
+    var indices = [];
+    for (var i = 0; i < NUM_PLAYERS; i++) indices.push(i);
+    for (var i = indices.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = indices[i]; indices[i] = indices[j]; indices[j] = tmp;
+    }
+    var nc = [], nn = [], na = [];
+    for (var i = 0; i < NUM_PLAYERS; i++) {
+      nc.push(colorMap[indices[i]]);
+      nn.push(playerNames[indices[i]]);
+      na.push(isAIPlayer[indices[i]]);
+    }
+    for (var i = 0; i < NUM_PLAYERS; i++) {
+      colorMap[i] = nc[i]; playerNames[i] = nn[i]; isAIPlayer[i] = na[i];
+    }
   }
   setDisplay('cp-panel', 'none');
   startGameWithColours();
@@ -1215,11 +1261,17 @@ function allPlaced() {
 }
 
 function advanceTurn() {
-  var prevTurn = turn;
-  var tries = 0;
-  do { turn = (turn + 1) % NUM_PLAYERS; tries++; } while (!alive[turn] && tries <= NUM_PLAYERS);
   moveNum++;
-  if (turn <= prevTurn) roundNum++;
+  // Remove dead players from queue
+  turnQueue = turnQueue.filter(function(p) { return alive[p]; });
+  if (turnQueue.length === 0) {
+    // New round
+    roundNum++;
+    buildTurnQueue();
+  }
+  if (turnQueue.length > 0) {
+    turn = turnQueue.shift();
+  }
   updateUI();
   if (isAI(turn) && alive[turn]) setTimeout(aiMove, SIZE >= 20 ? 80 : 350);
 }
@@ -2060,13 +2112,26 @@ function olConfirmColours() {
   for (var i = 0; i < NUM_HUMANS; i++) finalMap[i] = olColorMap[i];
   for (var a = 0; a < NUM_AIS; a++) finalMap[NUM_HUMANS + a] = available[a % available.length];
 
-  channel.publish('start', { size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap });
+  // Check randomize
+  var shuffledOrder = null;
+  var rcb = $('ol-randomize-order');
+  if (rcb && rcb.checked) {
+    shuffledOrder = [];
+    for (var i = 0; i < NUM_PLAYERS; i++) shuffledOrder.push(i);
+    for (var i = shuffledOrder.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = shuffledOrder[i]; shuffledOrder[i] = shuffledOrder[j]; shuffledOrder[j] = tmp;
+    }
+  }
+
+  channel.publish('start', { size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap, shuffledOrder: shuffledOrder, randomizeEnabled: !!(rcb && rcb.checked) });
 }
 
 function onOLStart(msg) {
   var d = msg.data;
   olUpdateLobbyPresence(onlinePlayers.length, true);
   gameStarted = true;
+  randomizeEnabled = !!d.randomizeEnabled;
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
   NUM_HUMANS = NUM_PLAYERS - NUM_AIS;
   mySlot = -1;
@@ -2077,11 +2142,26 @@ function onOLStart(msg) {
   if (d.colorMap) {
     for (var k in d.colorMap) colorMap[parseInt(k)] = d.colorMap[k];
   }
-  // Set player names from slot map
-  playerNames = [];
+  // Set player names and AI flags from slot map
+  playerNames = []; isAIPlayer = [];
   for (var i = 0; i < d.numPlayers; i++) {
-    if (i < d.slotMap.length) playerNames.push(d.slotMap[i].name);
-    else playerNames.push(PC(i).name + ' AI');
+    if (i < d.slotMap.length) { playerNames.push(d.slotMap[i].name); isAIPlayer.push(false); }
+    else { playerNames.push(PC(i).name + ' AI'); isAIPlayer.push(true); }
+  }
+  // Apply randomized order if provided
+  if (d.shuffledOrder) {
+    var nc = [], nn = [], na = [];
+    for (var i = 0; i < d.shuffledOrder.length; i++) {
+      var si = d.shuffledOrder[i];
+      nc.push(colorMap[si]); nn.push(playerNames[si]); na.push(isAIPlayer[si]);
+    }
+    for (var i = 0; i < NUM_PLAYERS; i++) {
+      colorMap[i] = nc[i]; playerNames[i] = nn[i]; isAIPlayer[i] = na[i];
+    }
+    // Remap mySlot
+    for (var i = 0; i < d.shuffledOrder.length; i++) {
+      if (d.shuffledOrder[i] === mySlot) { mySlot = i; break; }
+    }
   }
   hideOLPanels();
   setDisplay('main-menu', 'none');
@@ -2131,11 +2211,15 @@ function olExecuteMove(r, c, cb) {
 }
 
 function olAdvanceTurn() {
-  var prevTurn = turn;
-  var tries = 0;
-  do { turn = (turn + 1) % NUM_PLAYERS; tries++; } while (!alive[turn] && tries <= NUM_PLAYERS);
   moveNum++;
-  if (turn <= prevTurn) roundNum++;
+  turnQueue = turnQueue.filter(function(p) { return alive[p]; });
+  if (turnQueue.length === 0) {
+    roundNum++;
+    buildTurnQueue();
+  }
+  if (turnQueue.length > 0) {
+    turn = turnQueue.shift();
+  }
   updateOLUI();
   olScheduleAI();
 }
@@ -2746,6 +2830,9 @@ olJoinRoom = function() {
     channel.subscribe('move', onOLMove);
     channel.subscribe('newgame', onOLNewGame);
     channel.subscribe('sync', onSyncReceived);
+    channel.subscribe('turnorder', function(msg) {
+      if (!isHost && msg.data && msg.data.queue) { turnQueue = msg.data.queue; if (turnQueue.length > 0) turn = turnQueue.shift(); updateUI(); }
+    });
     showOLPanel('ol-lobby');
     showRoomChatTab(true);
     document.getElementById('ol-lob-code').textContent = roomCode;
@@ -2971,6 +3058,11 @@ function loadMainPublicRooms() {
     <div class="ol-row"><span class="ol-label">Visibility:</span>
       <button class="sbtn active" id="vis-public" onclick="olVisibility='public';document.getElementById('vis-public').className='sbtn active';document.getElementById('vis-private').className='sbtn';">Public</button>
       <button class="sbtn" id="vis-private" onclick="olVisibility='private';document.getElementById('vis-private').className='sbtn active';document.getElementById('vis-public').className='sbtn';">Private</button>
+    </div>
+    <div style="margin-top:0.4rem;">
+      <label style="font-size:12px;color:#999;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+        <input type="checkbox" id="ol-randomize-order"> Randomize turn order
+      </label>
     </div>
     <div style="margin-top:0.6rem;">
       <button class="mbtn primary" onclick="olCreateRoom()">Create</button>
