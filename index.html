@@ -1774,9 +1774,18 @@ function dismissDeath() {
 function playAgain() {
   if (gameMode === 'online') {
     if (isHost) {
-      channel.publish('newgame', {});
+      // Re-scan presence and publish newgame with updated slots
+      channel.presence.get(function(err, members) {
+        if (err) return;
+        var humans = members.filter(function(m) { return m.clientId; });
+        var slotMap = [];
+        for (var i = 0; i < humans.length; i++) {
+          slotMap.push({ clientId: humans[i].clientId, name: humans[i].data.name || 'Player', slot: i });
+        }
+        var totalPlayers = slotMap.length + olAIs;
+        channel.publish('newgame', { slotMap: slotMap, numPlayers: totalPlayers, numAIs: olAIs, size: SIZE, randomizeEnabled: randomizeEnabled });
+      });
     }
-    // non-host can't trigger play again
   } else {
     skipColourPicker = true;
     resetGame();
@@ -3054,11 +3063,46 @@ var _origOnOLStart = onOLStart;
 
 // When new game starts, spectators become players (host handles AI kicking)
 var _origOnOLNewGame = onOLNewGame;
-onOLNewGame = function() {
+onOLNewGame = function(msg) {
+  var d = msg.data || {};
   isSpectator = false;
   gameStarted = true;
   var _ov = $('overlay'); if (_ov) _ov.style.display = 'none';
   var _dp = $('death-panel'); if (_dp) _dp.style.display = 'none';
+
+  // Update game settings from host
+  if (d.numPlayers) NUM_PLAYERS = d.numPlayers;
+  if (d.numAIs !== undefined) NUM_AIS = d.numAIs;
+  NUM_HUMANS = NUM_PLAYERS - NUM_AIS;
+  if (d.size) SIZE = d.size;
+  if (d.randomizeEnabled !== undefined) randomizeEnabled = d.randomizeEnabled;
+
+  // Assign slots
+  if (d.slotMap) {
+    olSlotMapStored = d.slotMap;
+    mySlot = -1;
+    for (var i = 0; i < d.slotMap.length; i++) {
+      if (d.slotMap[i].clientId === myClientId) { mySlot = d.slotMap[i].slot; break; }
+    }
+    // Rebuild names and AI flags
+    playerNames = []; isAIPlayer = [];
+    defaultColorMap();
+    for (var i = 0; i < NUM_PLAYERS; i++) {
+      if (i < d.slotMap.length) { playerNames.push(d.slotMap[i].name); isAIPlayer.push(false); }
+      else { isAIPlayer.push(true); playerNames.push(PC(i).name + ' AI'); }
+    }
+    // Update online info
+    var oi = $('online-info');
+    if (oi && mySlot >= 0) {
+      oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+    }
+  }
+
+  // Shuffle match order
+  matchOrder = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) matchOrder.push(i);
+  if (randomizeEnabled && isHost) shuffleMatchOrder();
+
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   moveQueue = []; processing = false;
   olScheduleAI();
