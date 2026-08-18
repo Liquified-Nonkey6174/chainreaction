@@ -2469,6 +2469,8 @@ function updateOLUI() {
 var demoBoard, demoTurn, demoAlive, demoPlaced, demoTimer, demoAnimating;
 var DEMO_SIZE = 5, DEMO_PLAYERS = 4;
 var DEMO_COLORS = [0, 33, 21, 14]; // Red, Blue, Green, Gold
+var demoMoves = 0, DEMO_MAX_MOVES = 120;
+var demoStaleMoves = 0;
 
 function demoInit() {
   demoBoard = [];
@@ -2480,6 +2482,8 @@ function demoInit() {
   demoAlive = [true, true, true, true];
   demoPlaced = [false, false, false, false];
   demoAnimating = false;
+  demoMoves = 0;
+  demoStaleMoves = 0;
   demoRender();
   clearInterval(demoTimer);
   demoTimer = setInterval(demoStep, 700);
@@ -2489,9 +2493,17 @@ function demoStep() {
   if (document.getElementById('main-menu').style.display === 'none') return;
   if (demoAnimating) return;
 
+  demoMoves++;
+  if (demoMoves > DEMO_MAX_MOVES) { setTimeout(demoInit, 1500); clearInterval(demoTimer); return; }
+
   var aliveCount = 0;
   for (var i = 0; i < DEMO_PLAYERS; i++) if (demoAlive[i]) aliveCount++;
-  if (aliveCount <= 1) { setTimeout(demoInit, 2000); clearInterval(demoTimer); return; }
+  if (aliveCount <= 1) {
+    demoStaleMoves++;
+    if (demoStaleMoves >= 10) { setTimeout(demoInit, 1500); clearInterval(demoTimer); return; }
+  } else {
+    demoStaleMoves = 0;
+  }
 
   var tries = 0;
   while (!demoAlive[demoTurn] && tries < DEMO_PLAYERS) { demoTurn = (demoTurn + 1) % DEMO_PLAYERS; tries++; }
@@ -2897,7 +2909,11 @@ function escHtml(s) {
 function startRoomChatListener() {}
 
 function onPlayerDisconnect(member) {
-  if (!gameStarted || !board) return;
+  if (!gameStarted || !board) {
+    // In lobby: check if host left and migrate
+    handleHostMigration(member);
+    return;
+  }
   var cid = member.clientId;
   // Find which slot this player had
   for (var i = 0; i < olSlotMapStored.length; i++) {
@@ -2909,6 +2925,45 @@ function onPlayerDisconnect(member) {
       break;
     }
   }
+  // Check if host left
+  handleHostMigration(member);
+}
+
+function handleHostMigration(leftMember) {
+  if (!channel) return;
+  // Check if the person who left was the host
+  var leftWasHost = false;
+  for (var i = 0; i < onlinePlayers.length; i++) {
+    if (onlinePlayers[i].clientId === leftMember.clientId && onlinePlayers[i].host) {
+      leftWasHost = true;
+      break;
+    }
+  }
+  if (!leftWasHost) return;
+
+  // Get remaining members
+  channel.presence.get(function(err, members) {
+    if (err) return;
+    if (members.length === 0) {
+      // Room is empty — clean up
+      olLeaveLobbyChannel();
+      return;
+    }
+    // First remaining member becomes host
+    var newHostId = members[0].clientId;
+    if (newHostId === myClientId) {
+      isHost = true;
+      // Update presence to mark as host
+      channel.presence.update({ name: myName, host: true });
+      // Notify all players
+      channel.publish('hostmigrate', { newHostId: newHostId, newHostName: myName });
+      // Show host controls
+      var oi = $('online-info');
+      if (oi && gameStarted) {
+        oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are now <strong>Host</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+      }
+    }
+  });
 }
 
 // ======== SPECTATOR SYSTEM ========
@@ -2940,6 +2995,20 @@ olJoinRoom = function() {
         currentRoundOrder = turnQueue.slice();
         if (turnQueue.length > 0) turn = turnQueue.shift();
         renderPlayerBar(); updateUI();
+      }
+    });
+    channel.subscribe('hostmigrate', function(msg) {
+      var d = msg.data;
+      if (d.newHostId === myClientId) {
+        isHost = true;
+      } else {
+        isHost = false;
+      }
+      // Update play again button
+      var paBtn = $('play-again-btn');
+      if (paBtn) {
+        if (isHost) { paBtn.textContent = 'Play again'; paBtn.style.opacity = ''; paBtn.style.cursor = ''; }
+        else { paBtn.textContent = 'Waiting for host…'; paBtn.style.opacity = '0.5'; paBtn.style.cursor = 'default'; }
       }
     });
     showOLPanel('ol-lobby');
@@ -2988,6 +3057,11 @@ olCreateRoom = function() {
           gameStarted: true
         });
       }
+    });
+    channel.subscribe('hostmigrate', function(msg) {
+      // Host shouldn't normally receive this as they're the host, but handle migration
+      var d = msg.data;
+      if (d.newHostId === myClientId) isHost = true;
     });
     olEnterLobby();
     showRoomChatTab(true);
