@@ -1838,13 +1838,21 @@ function hideOLPanels() {
 }
 
 // ---- PUBLIC ROOM LOBBY ----
-function ensureLobbyAbly(cb) {
+function ensureAbly(cb) {
   if (typeof Ably === 'undefined') { console.warn('Ably not available'); return; }
-  if (ably && ably.connection.state === 'connected') { cb(); return; }
+  if (ably && (ably.connection.state === 'connected' || ably.connection.state === 'connecting')) {
+    if (ably.connection.state === 'connected') { cb(); }
+    else { ably.connection.once('connected', function() { cb(); }); }
+    return;
+  }
   if (!myClientId) myClientId = 'p_' + Math.random().toString(36).substr(2, 8);
   ably = new Ably.Realtime({ key: ABLY_KEY, clientId: myClientId });
-  ably.connection.on('connected', function() { cb(); });
+  ably.connection.once('connected', function() { cb(); });
 }
+
+// Aliases for backward compat
+function ensureLobbyAbly(cb) { ensureAbly(cb); }
+function initAbly(cb) { ensureAbly(cb); }
 
 function olEnterLobby() {
   if (olVisibility !== 'public') return;
@@ -1949,12 +1957,6 @@ function buildOLCreateBtns() {
   buildOLNumRow('ol-c-humans', 0, mp, olHumans, function(n) { olHumans = n; if (olHumans + olAIs > olMaxPlayers()) olAIs = olMaxPlayers() - olHumans; if (olHumans + olAIs < 2 && olAIs < 1) olAIs = 1; buildOLCreateBtns(); });
   buildOLNumRow('ol-c-ais', 0, mp - olHumans, olAIs, function(n) { olAIs = n; buildOLCreateBtns(); });
   buildOLSizeRow('ol-c-size', olSize, function(n) { olSize = n; if (olHumans + olAIs > olMaxPlayers()) { olAIs = Math.max(0, olMaxPlayers() - olHumans); if (olHumans > olMaxPlayers()) olHumans = olMaxPlayers(); } buildOLCreateBtns(); });
-}
-
-function initAbly(cb) {
-  myClientId = 'p_' + Math.random().toString(36).substr(2, 8);
-  ably = new Ably.Realtime({ key: ABLY_KEY, clientId: myClientId });
-  ably.connection.on('connected', function() { cb(); });
 }
 
 function olCreateRoom() {
