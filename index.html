@@ -617,7 +617,8 @@ var gameStarted = false;
 var isAIPlayer = []; // per-player AI flag, survives shuffling
 var randomizeEnabled = false;
 var turnQueue = [];
-var currentRoundOrder = []; // full order for display purposes
+var currentRoundOrder = [];
+var matchOrder = []; // shuffled once per match, reused every round
 function PC(i) { var ci = colorMap[i]; return ci >= 0 ? COLORS[ci] : { name:'?', dot:'#999', shadow:'#666', dotCol:'#fff' }; }
 function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
 function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
@@ -701,22 +702,31 @@ function initBoard() {
 }
 
 function buildTurnQueue() {
-  turnQueue = [];
-  for (var i = 0; i < NUM_PLAYERS; i++) {
-    if (alive[i]) turnQueue.push(i);
-  }
-  if (randomizeEnabled && (gameMode !== 'online' || isHost)) {
-    // Only shuffle locally for local games, or if we're the host in online
-    for (var i = turnQueue.length - 1; i > 0; i--) {
-      var j = Math.floor(Math.random() * (i + 1));
-      var tmp = turnQueue[i]; turnQueue[i] = turnQueue[j]; turnQueue[j] = tmp;
+  if (matchOrder.length > 0) {
+    // Use match order, filter out dead players
+    turnQueue = matchOrder.filter(function(p) { return alive[p]; });
+  } else {
+    turnQueue = [];
+    for (var i = 0; i < NUM_PLAYERS; i++) {
+      if (alive[i]) turnQueue.push(i);
     }
   }
-  // In online mode, host broadcasts the queue so everyone uses the same order
+  currentRoundOrder = turnQueue.slice();
+  // In online mode, host broadcasts the queue so everyone is in sync
   if (gameMode === 'online' && isHost && channel && randomizeEnabled) {
     channel.publish('turnorder', { queue: turnQueue.slice() });
   }
-  currentRoundOrder = turnQueue.slice();
+}
+
+function shuffleMatchOrder() {
+  matchOrder = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) matchOrder.push(i);
+  if (randomizeEnabled) {
+    for (var i = matchOrder.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = matchOrder[i]; matchOrder[i] = matchOrder[j]; matchOrder[j] = tmp;
+    }
+  }
 }
 
 function isAI(p) { return isAIPlayer[p] || false; }
@@ -905,25 +915,23 @@ function confirmColours() {
   for (var i = 0; i < NUM_PLAYERS; i++) {
     if (isAIPlayer[i]) playerNames[i] = PC(i).name + ' AI';
   }
-  // Set randomize flag for per-round shuffling
+  // Set randomize flag and shuffle match order once
   var cb = $('cp-randomize-order');
   randomizeEnabled = cb && cb.checked;
+  shuffleMatchOrder();
   if (randomizeEnabled) {
-    var indices = [];
-    for (var i = 0; i < NUM_PLAYERS; i++) indices.push(i);
-    for (var i = indices.length - 1; i > 0; i--) {
-      var j = Math.floor(Math.random() * (i + 1));
-      var tmp = indices[i]; indices[i] = indices[j]; indices[j] = tmp;
-    }
     var nc = [], nn = [], na = [];
     for (var i = 0; i < NUM_PLAYERS; i++) {
-      nc.push(colorMap[indices[i]]);
-      nn.push(playerNames[indices[i]]);
-      na.push(isAIPlayer[indices[i]]);
+      nc.push(colorMap[matchOrder[i]]);
+      nn.push(playerNames[matchOrder[i]]);
+      na.push(isAIPlayer[matchOrder[i]]);
     }
     for (var i = 0; i < NUM_PLAYERS; i++) {
       colorMap[i] = nc[i]; playerNames[i] = nn[i]; isAIPlayer[i] = na[i];
     }
+    // Reset matchOrder to sequential since we already remapped
+    matchOrder = [];
+    for (var i = 0; i < NUM_PLAYERS; i++) matchOrder.push(i);
   }
   setDisplay('cp-panel', 'none');
   startGameWithColours();
@@ -2196,6 +2204,7 @@ function onOLStart(msg) {
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
   NUM_HUMANS = NUM_PLAYERS - NUM_AIS;
   mySlot = -1;
+  olSlotMapStored = d.slotMap || [];
   for (var i = 0; i < d.slotMap.length; i++) if (d.slotMap[i].clientId === myClientId) { mySlot = d.slotMap[i].slot; break; }
   wins = []; for (var i = 0; i < COLORS.length; i++) wins.push(0);
   // Apply colour map
@@ -2210,6 +2219,8 @@ function onOLStart(msg) {
     else { playerNames.push(PC(i).name + ' AI'); isAIPlayer.push(true); }
   }
   // Apply randomized order if provided
+  matchOrder = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) matchOrder.push(i);
   if (d.shuffledOrder) {
     var nc = [], nn = [], na = [];
     for (var i = 0; i < d.shuffledOrder.length; i++) {
@@ -2876,9 +2887,25 @@ function escHtml(s) {
 
 function startRoomChatListener() {}
 
+function onPlayerDisconnect(member) {
+  if (!gameStarted || !board) return;
+  var cid = member.clientId;
+  // Find which slot this player had
+  for (var i = 0; i < olSlotMapStored.length; i++) {
+    if (olSlotMapStored[i].clientId === cid) {
+      var slot = olSlotMapStored[i].slot;
+      if (alive[slot]) {
+        executeForfeit(slot);
+      }
+      break;
+    }
+  }
+}
+
 // ======== SPECTATOR SYSTEM ========
 var isSpectator = false;
-var spectators = []; // {clientId, name}
+var spectators = [];
+var olSlotMapStored = []; // stored from start message for disconnect lookup
 
 // Override olJoinRoom to handle late joins
 var _origOlJoinRoom = olJoinRoom;
@@ -2891,6 +2918,7 @@ olJoinRoom = function() {
     channel = ably.channels.get('cr-' + roomCode);
     channel.presence.enter({ name: myName, host: false, spectator: false });
     channel.presence.subscribe(updateOLLobby);
+    channel.presence.subscribe('leave', onPlayerDisconnect);
     channel.subscribe('setup', onOLSetup);
     channel.subscribe('colourpick', onOLColourPick);
     channel.subscribe('start', onOLStart);
@@ -2934,6 +2962,7 @@ olCreateRoom = function() {
     channel = ably.channels.get('cr-' + roomCode);
     channel.presence.enter({ name: myName, host: true });
     channel.presence.subscribe(updateOLLobby);
+    channel.presence.subscribe('leave', onPlayerDisconnect);
     channel.subscribe('setup', onOLSetup);
     channel.subscribe('colourpick', onOLColourPick);
     channel.subscribe('start', onOLStart);
