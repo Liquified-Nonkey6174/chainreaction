@@ -1742,6 +1742,7 @@ function goMainMenu() {
   gameGeneration++;
   pgGeneration++;
   document.body.style.paddingLeft = '5rem';
+  try { loadMainPublicRooms(); } catch(e) {}
 }
 
 wins = [];
@@ -1817,6 +1818,26 @@ var onlinePlayers = [], mySlot = -1, gameMode = 'local';
 var olAIs = 0, olHumans = 2, olSize = 5;
 var olVisibility = 'public';
 var lobbyChannel = null;
+var lobbyListenerAttached = false;
+
+function getLobbyChannel(cb) {
+  ensureAbly(function() {
+    if (!lobbyChannel) {
+      lobbyChannel = ably.channels.get('cr-public-lobby');
+    }
+    cb(lobbyChannel);
+  });
+}
+
+function detachLobbyListener() {
+  if (lobbyChannel && !isHost) {
+    // Don't detach if we're the host (we need presence for public listing)
+    try { lobbyChannel.presence.unsubscribe(); } catch(e) {}
+    try { lobbyChannel.detach(); } catch(e) {}
+    lobbyChannel = null;
+    lobbyListenerAttached = false;
+  }
+}
 var moveQueue = [], processing = false;
 
 function showOLPanel(id) {
@@ -1839,6 +1860,7 @@ function hideOLPanels() {
 
 // ---- PUBLIC ROOM LOBBY ----
 function ensureAbly(cb) {
+  if (amBlocked) { console.warn('Blocked from online play.'); return; }
   if (typeof Ably === 'undefined') { console.warn('Ably not available'); return; }
   if (ably && (ably.connection.state === 'connected' || ably.connection.state === 'connecting')) {
     if (ably.connection.state === 'connected') { cb(); }
@@ -1856,8 +1878,8 @@ function initAbly(cb) { ensureAbly(cb); }
 
 function olEnterLobby() {
   if (olVisibility !== 'public') return;
-  ensureLobbyAbly(function() {
-    lobbyChannel = ably.channels.get('cr-public-lobby');
+  getLobbyChannel(function(lc) {
+    lobbyChannel = lc;
     lobbyChannel.presence.enter({
       roomCode: roomCode,
       hostName: myName,
@@ -1893,8 +1915,7 @@ function olLoadPublicRooms() {
   var list = document.getElementById('ol-public-list');
   if (!list) return;
   list.innerHTML = '<div style="font-size:12px;color:#ccc;font-style:italic;">Loading…</div>';
-  ensureLobbyAbly(function() {
-    var lc = ably.channels.get('cr-public-lobby');
+  getLobbyChannel(function(lc) {
     lc.presence.get(function(err, members) {
       if (err || !members || members.length === 0) {
         list.innerHTML = '<div style="font-size:12px;color:#ccc;font-style:italic;">No public rooms available</div>';
@@ -2210,6 +2231,7 @@ function olConfirmColours() {
 function onOLStart(msg) {
   var d = msg.data;
   olUpdateLobbyPresence(onlinePlayers.length, true);
+  if (!isHost) detachLobbyListener(); // non-host doesn't need lobby during game
   gameStarted = true;
   randomizeEnabled = !!d.randomizeEnabled;
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
@@ -2683,7 +2705,35 @@ if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
 var myUserId = localStorage.getItem('cr-userId') || ('u_' + Math.random().toString(36).substr(2, 10));
 localStorage.setItem('cr-userId', myUserId);
 var myUsername = localStorage.getItem('cr-username') || '';
+var mySecretCode = localStorage.getItem('cr-secret');
+if (!mySecretCode) {
+  mySecretCode = '';
+  for (var _i = 0; _i < 10; _i++) mySecretCode += Math.floor(Math.random() * 10);
+  localStorage.setItem('cr-secret', mySecretCode);
+}
 var usernameEditing = false;
+
+// ======== BLOCK LIST (admin can block a device's 10-digit code) ========
+var amBlocked = false;
+function checkBlockStatus() {
+  if (!db) return;
+  db.ref('banned/' + mySecretCode).once('value', function(snap) {
+    if (snap.exists()) {
+      amBlocked = true;
+      showBlockedNotice(snap.val());
+    }
+  });
+}
+function showBlockedNotice(info) {
+  var reason = (info && info.reason) ? info.reason : '';
+  var bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+    'background:#3a1414;color:#f2ece2;padding:10px 16px;font:600 13px -apple-system,BlinkMacSystemFont,sans-serif;' +
+    'text-align:center;border-bottom:1px solid #6b2b2b;';
+  bar.textContent = 'This device is blocked from online play and chat' + (reason ? (': ' + reason) : '.') + ' Local play against AI still works.';
+  document.body.appendChild(bar);
+}
+checkBlockStatus();
 
 function initUsername() {
   if (myUsername) {
@@ -2785,7 +2835,7 @@ function updateOldMessages(newName) {
 function registerUsername(name) {
   if (!db) return;
   db.ref('usernames/' + name.toLowerCase()).set(myUserId);
-  db.ref('users/' + myUserId).set({ username: name, lastSeen: firebase.database.ServerValue.TIMESTAMP });
+  db.ref('users/' + myUserId).set({ username: name, secret: mySecretCode, lastSeen: firebase.database.ServerValue.TIMESTAMP });
 }
 
 // ======== CHAT SYSTEM ========
@@ -2874,6 +2924,7 @@ function attachChatListener() {
 }
 
 function sendChat() {
+  if (amBlocked) return;
   var inp = $('chat-input');
   if (!inp) return;
   var text = inp.value.trim();
@@ -3204,8 +3255,7 @@ var mainPubSubbed = false;
 function loadMainPublicRooms() {
   var list = document.getElementById('main-pub-list');
   if (!list) return;
-  ensureLobbyAbly(function() {
-    var lc = ably.channels.get('cr-public-lobby');
+  getLobbyChannel(function(lc) {
     lc.presence.get(function(err, members) {
       if (!list) return;
       if (err || !members || members.length === 0) {
