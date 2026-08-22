@@ -1867,9 +1867,16 @@ function ensureAbly(cb) {
     else { ably.connection.once('connected', function() { cb(); }); }
     return;
   }
+  if (ably && (ably.connection.state === 'disconnected' || ably.connection.state === 'suspended')) {
+    ably.connection.connect();
+    ably.connection.once('connected', function() { cb(); });
+    return;
+  }
   if (!myClientId) myClientId = 'p_' + Math.random().toString(36).substr(2, 8);
-  ably = new Ably.Realtime({ key: ABLY_KEY, clientId: myClientId });
+  ably = new Ably.Realtime({ key: ABLY_KEY, clientId: myClientId, disconnectedRetryTimeout: 5000, suspendedRetryTimeout: 15000 });
   ably.connection.once('connected', function() { cb(); });
+  ably.connection.on('disconnected', function() { console.warn('Ably disconnected, will retry...'); });
+  ably.connection.on('suspended', function() { console.warn('Ably suspended, retrying...'); ably.connection.connect(); });
 }
 
 // Aliases for backward compat
@@ -1881,27 +1888,16 @@ function olEnterLobby() {
   getLobbyChannel(function(lc) {
     lobbyChannel = lc;
     lobbyChannel.presence.enter({
-      roomCode: roomCode,
-      hostName: myName,
-      size: olSize,
-      humans: olHumans,
-      ais: olAIs,
-      playerCount: 1
+      roomCode: roomCode, hostName: myName, size: olSize, humans: olHumans, ais: olAIs, playerCount: 1
     });
   });
+  if (db) db.ref('rooms/' + roomCode).set({ hostName: myName, size: olSize, humans: olHumans, ais: olAIs, playerCount: 1, inProgress: false, ts: firebase.database.ServerValue.TIMESTAMP });
 }
 
 function olUpdateLobbyPresence(count, inProgress) {
   if (!lobbyChannel || olVisibility !== 'public') return;
-  lobbyChannel.presence.update({
-    roomCode: roomCode,
-    hostName: myName,
-    size: olSize,
-    humans: olHumans,
-    ais: olAIs,
-    playerCount: count,
-    inProgress: !!inProgress
-  });
+  lobbyChannel.presence.update({ roomCode: roomCode, hostName: myName, size: olSize, humans: olHumans, ais: olAIs, playerCount: count, inProgress: !!inProgress });
+  if (db) db.ref('rooms/' + roomCode).update({ playerCount: count, inProgress: !!inProgress });
 }
 
 function olLeaveLobbyChannel() {
@@ -1909,6 +1905,7 @@ function olLeaveLobbyChannel() {
     try { lobbyChannel.presence.leave(); } catch(e) {}
     lobbyChannel = null;
   }
+  if (db && roomCode) db.ref('rooms/' + roomCode).remove();
 }
 
 function olLoadPublicRooms() {
@@ -2273,7 +2270,7 @@ function onOLStart(msg) {
   setDisplay('local-screen', '');
   setDisplay('local-settings', 'none');
   setDisplay('online-info', '');
-  document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+  document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="toggleSpectate()" style="padding:3px 10px;font-size:10px;">Spectate</button> <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   olScheduleAI();
 }
@@ -2804,6 +2801,13 @@ function setUsername() {
     updateOldMessages(myUsername);
     loadChat();
     if (!chatInitialized) { chatInitialized = true; }
+    // Update in-game name if playing online
+    if (gameMode === 'online' && mySlot >= 0) {
+      myName = myUsername;
+      playerNames[mySlot] = myUsername;
+      if (channel) channel.presence.update({ name: myName, host: isHost, spectator: isSpectator });
+      renderPlayerBar();
+    }
     // Pre-fill online name inputs
     var ci = document.getElementById('ol-create-name');
     if (ci && !ci.value) ci.value = myUsername;
@@ -2915,7 +2919,12 @@ function attachChatListener() {
       var div = document.createElement('div');
       div.className = 'chat-msg';
       var time = m.timestamp ? new Date(m.timestamp) : new Date();
-      var timeStr = time.getHours().toString().padStart(2, '0') + ':' + time.getMinutes().toString().padStart(2, '0');
+      var today = new Date();
+      var dateStr = '';
+      if (time.toDateString() === today.toDateString()) dateStr = '';
+      else if (time.toDateString() === new Date(today - 86400000).toDateString()) dateStr = 'Yesterday ';
+      else dateStr = time.getDate() + '/' + (time.getMonth()+1) + ' ';
+      var timeStr = dateStr + time.getHours().toString().padStart(2, '0') + ':' + time.getMinutes().toString().padStart(2, '0');
       div.innerHTML = '<span class="msg-name">' + escHtml(m.username || 'Anon') + '</span><span class="msg-time">' + timeStr + '</span><div class="msg-text">' + escHtml(m.text) + '</div>';
       c.appendChild(div);
     }
@@ -2960,6 +2969,26 @@ function escHtml(s) {
 }
 
 function startRoomChatListener() {}
+
+// ======== SPECTATE TOGGLE ========
+function toggleSpectate() {
+  if (gameMode !== 'online' || mySlot < 0) return;
+  // Forfeit and become spectator
+  if (alive[mySlot]) executeForfeit(mySlot);
+  isSpectator = true;
+  mySlot = -1;
+  channel.presence.update({ name: myName, host: isHost, spectator: true });
+  var oi = $('online-info');
+  if (oi) oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectating</span> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+}
+
+// ======== HOST TRANSFER ========
+function transferHost(targetClientId) {
+  if (!isHost || !channel) return;
+  isHost = false;
+  channel.presence.update({ name: myName, host: false });
+  channel.publish('hostmigrate', { newHostId: targetClientId });
+}
 
 function onPlayerDisconnect(member) {
   if (!gameStarted || !board) {
@@ -3107,6 +3136,7 @@ olCreateRoom = function() {
           size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, numHumans: NUM_HUMANS,
           colorMap: colorMap, playerNames: playerNames,
           roundNum: roundNum, elimOrder: elimOrder, elimInfo: elimInfo, killCounts: killCounts,
+          matchOrder: matchOrder, turnQueue: turnQueue.slice(), currentRoundOrder: currentRoundOrder,
           gameStarted: true
         });
       }
@@ -3128,7 +3158,7 @@ olCreateRoom = function() {
 
 function onSyncReceived(msg) {
   if (isHost) return;
-  if (gameStarted && !isSpectator) return; // already playing, ignore sync
+  if (gameStarted && !isSpectator) return;
   var d = msg.data;
   if (!d.gameStarted) return;
   isSpectator = true;
@@ -3139,14 +3169,22 @@ function onSyncReceived(msg) {
   colorMap = d.colorMap; playerNames = d.playerNames;
   roundNum = d.roundNum; elimOrder = d.elimOrder || []; elimInfo = d.elimInfo || {};
   killCounts = d.killCounts || [];
-  mySlot = -1; // spectator has no slot
+  // Rebuild isAIPlayer from names
+  isAIPlayer = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) {
+    isAIPlayer.push(playerNames[i] && playerNames[i].indexOf(' AI') === playerNames[i].length - 3);
+  }
+  if (d.matchOrder) matchOrder = d.matchOrder;
+  if (d.turnQueue) turnQueue = d.turnQueue;
+  if (d.currentRoundOrder) currentRoundOrder = d.currentRoundOrder;
+  mySlot = -1;
   wins = []; for (var i = 0; i < COLORS.length; i++) wins.push(0);
   hideOLPanels();
   setDisplay('main-menu', 'none');
   setDisplay('local-screen', '');
   setDisplay('local-settings', 'none');
   setDisplay('online-info', '');
-  document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectator</span> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+  document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectating</span> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
 }
 
@@ -3167,8 +3205,18 @@ updateOLLobby = function() {
         div.appendChild(pip);
         var txt = onlinePlayers[i].name;
         if (onlinePlayers[i].host) txt += ' (host)';
+        if (onlinePlayers[i].spectator) txt += ' 👁';
         if (onlinePlayers[i].clientId === myClientId) txt += ' — you';
         div.appendChild(document.createTextNode(txt));
+        // Host can transfer host role
+        if (isHost && onlinePlayers[i].clientId !== myClientId) {
+          var tb = document.createElement('button');
+          tb.textContent = '♛';
+          tb.title = 'Make host';
+          tb.style.cssText = 'margin-left:6px;border:none;background:none;cursor:pointer;font-size:12px;opacity:0.4;';
+          (function(cid) { tb.onclick = function() { if (confirm('Transfer host to ' + cid + '?')) transferHost(cid); }; })(onlinePlayers[i].clientId);
+          div.appendChild(tb);
+        }
         list.appendChild(div);
       }
     }
@@ -3221,7 +3269,7 @@ onOLNewGame = function(msg) {
     // Update online info
     var oi = $('online-info');
     if (oi && mySlot >= 0) {
-      oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+      oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="toggleSpectate()" style="padding:3px 10px;font-size:10px;">Spectate</button> <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
     }
   }
 
@@ -3255,55 +3303,68 @@ var mainPubSubbed = false;
 function loadMainPublicRooms() {
   var list = document.getElementById('main-pub-list');
   if (!list) return;
+  var roomsRendered = false;
+
+  function renderRooms(rooms) {
+    if (roomsRendered) return;
+    roomsRendered = true;
+    list.innerHTML = '';
+    if (!rooms || rooms.length === 0) {
+      list.innerHTML = '<div style="font-style:italic;opacity:0.6;">No public rooms right now</div>';
+      return;
+    }
+    for (var i = 0; i < rooms.length; i++) {
+      var d = rooms[i];
+      var row = document.createElement('div');
+      row.className = 'main-pub-room';
+      row.innerHTML = '<div class="mpr-info"><div class="mpr-host">' + escHtml(d.hostName || 'Host') + '\'s room' +
+        (d.inProgress ? ' <span style="font-size:10px;background:rgba(255,255,255,0.3);padding:1px 6px;border-radius:8px;font-weight:500;">In Progress</span>' : '') +
+        '</div>' +
+        '<div class="mpr-details">' + d.size + '×' + d.size + ' · ' + d.humans + 'H' +
+        (d.ais > 0 ? ' + ' + d.ais + 'AI' : '') + ' · ' + (d.playerCount || 1) + ' in</div></div>' +
+        '<div class="mpr-code">' + d.roomCode + '</div>';
+      (function(code) {
+        row.onclick = function() {
+          if (myUsername) {
+            var inp = document.getElementById('ol-join-code');
+            if (inp) inp.value = code;
+            olJoinRoom();
+          } else {
+            var inp = document.getElementById('ol-join-code');
+            if (inp) inp.value = code;
+            showOLPanel('ol-join');
+          }
+        };
+      })(d.roomCode);
+      list.appendChild(row);
+    }
+  }
+
+  // Try Ably presence first
   getLobbyChannel(function(lc) {
     lc.presence.get(function(err, members) {
-      if (!list) return;
-      if (err || !members || members.length === 0) {
-        list.innerHTML = '<div style="font-style:italic;opacity:0.6;">No public rooms right now</div>';
-      } else {
-        list.innerHTML = '';
-        var count = 0;
-        for (var i = 0; i < members.length; i++) {
-          var d = members[i].data;
-          if (!d || !d.roomCode) continue;
-          count++;
-          var row = document.createElement('div');
-          row.className = 'main-pub-room';
-          row.innerHTML = '<div class="mpr-info"><div class="mpr-host">' + escHtml(d.hostName || 'Host') + '\'s room' +
-            (d.inProgress ? ' <span style="font-size:10px;background:rgba(255,255,255,0.3);padding:1px 6px;border-radius:8px;font-weight:500;">In Progress</span>' : '') +
-            '</div>' +
-            '<div class="mpr-details">' + d.size + '×' + d.size + ' · ' + d.humans + 'H' +
-            (d.ais > 0 ? ' + ' + d.ais + 'AI' : '') + ' · ' + (d.playerCount || 1) + ' in</div></div>' +
-            '<div class="mpr-code">' + d.roomCode + '</div>';
-          (function(code) {
-            row.onclick = function() {
-              if (myUsername) {
-                // Join directly
-                var inp = document.getElementById('ol-join-code');
-                if (inp) inp.value = code;
-                olJoinRoom();
-              } else {
-                // Need username first, show join panel
-                var inp = document.getElementById('ol-join-code');
-                if (inp) inp.value = code;
-                showOLPanel('ol-join');
-              }
-            };
-          })(d.roomCode);
-          list.appendChild(row);
-        }
-        if (count === 0) {
-          list.innerHTML = '<div style="font-style:italic;opacity:0.6;">No public rooms right now</div>';
-        }
+      if (!err && members && members.length > 0) {
+        var rooms = members.map(function(m) { return m.data; }).filter(function(d) { return d && d.roomCode; });
+        renderRooms(rooms);
       }
     });
     if (!mainPubSubbed) {
       mainPubSubbed = true;
-      lc.presence.subscribe(function() {
-        setTimeout(loadMainPublicRooms, 500);
-      });
+      lc.presence.subscribe(function() { roomsRendered = false; setTimeout(loadMainPublicRooms, 500); });
     }
   });
+
+  // Also check Firebase for persistent rooms
+  if (db) {
+    db.ref('rooms').once('value', function(snap) {
+      if (roomsRendered) return;
+      var rooms = [];
+      snap.forEach(function(child) {
+        var d = child.val(); d.roomCode = child.key; rooms.push(d);
+      });
+      renderRooms(rooms);
+    });
+  }
 }
 // Public rooms loaded via DOMContentLoaded
 </script>
