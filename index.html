@@ -2793,7 +2793,7 @@ function setUsername() {
   var inp = document.getElementById('uname-input');
   var name = inp.value.trim();
   if (!name || name.length < 1) return;
-  if (!db) { myUsername = name; localStorage.setItem('cr-username', myUsername); showUsername(myUsername); updateChatUsernameNotice(); loadChat(); prefillNames(); return; }
+  if (!db) { localStorage.setItem('cr-prev-username', myUsername); myUsername = name; localStorage.setItem('cr-username', myUsername); showUsername(myUsername); updateChatUsernameNotice(); loadChat(); prefillNames(); return; }
   // Check uniqueness
   db.ref('usernames/' + name.toLowerCase()).once('value', function(snap) {
     if (snap.exists() && snap.val() !== myUserId) {
@@ -2803,13 +2803,20 @@ function setUsername() {
     // Release old name and claim the new one as a single atomic write, so a
     // dropped connection can't release the old claim without the new one
     // landing (or vice versa) and leave an orphaned duplicate behind.
+    var isRename = myUsername && myUsername.toLowerCase() !== name.toLowerCase();
     var updates = {};
-    if (myUsername && myUsername.toLowerCase() !== name.toLowerCase()) {
+    if (isRename) {
       updates['usernames/' + myUsername.toLowerCase()] = null;
+      // Log the outgoing name to this user's rename history before overwriting it.
+      var histKey = db.ref('users/' + myUserId + '/history').push().key;
+      updates['users/' + myUserId + '/history/' + histKey] = { name: myUsername, changedAt: firebase.database.ServerValue.TIMESTAMP };
     }
     updates['usernames/' + name.toLowerCase()] = myUserId;
-    updates['users/' + myUserId] = { username: name, secret: mySecretCode, lastSeen: firebase.database.ServerValue.TIMESTAMP };
+    updates['users/' + myUserId + '/username'] = name;
+    updates['users/' + myUserId + '/secret'] = mySecretCode;
+    updates['users/' + myUserId + '/lastSeen'] = firebase.database.ServerValue.TIMESTAMP;
     db.ref().update(updates).then(function() {
+      localStorage.setItem('cr-prev-username', myUsername);
       myUsername = name;
       localStorage.setItem('cr-username', myUsername);
       showUsername(myUsername);
@@ -2837,13 +2844,28 @@ function setUsername() {
 
 function updateOldMessages(newName) {
   if (!db) return;
-  // Update global chat messages
+  var oldName = localStorage.getItem('cr-prev-username') || '';
+  // Update global chat messages sent by this user
   db.ref('chat/global').orderByChild('userId').equalTo(myUserId).once('value', function(snap) {
     if (!snap.exists()) return;
     var updates = {};
     snap.forEach(function(child) { updates[child.key + '/username'] = newName; });
     db.ref('chat/global').update(updates);
   });
+  // Update reply quotes that reference old username in global chat
+  if (oldName) {
+    db.ref('chat/global').once('value', function(snap) {
+      if (!snap.exists()) return;
+      var updates = {};
+      snap.forEach(function(child) {
+        var m = child.val();
+        if (m.replyTo && m.replyTo.username === oldName) {
+          updates[child.key + '/replyTo/username'] = newName;
+        }
+      });
+      if (Object.keys(updates).length > 0) db.ref('chat/global').update(updates);
+    });
+  }
   // Update room chat messages if in a room
   if (roomCode) {
     db.ref('chat/rooms/' + roomCode).orderByChild('userId').equalTo(myUserId).once('value', function(snap) {
@@ -2852,6 +2874,19 @@ function updateOldMessages(newName) {
       snap.forEach(function(child) { updates[child.key + '/username'] = newName; });
       db.ref('chat/rooms/' + roomCode).update(updates);
     });
+    if (oldName) {
+      db.ref('chat/rooms/' + roomCode).once('value', function(snap) {
+        if (!snap.exists()) return;
+        var updates = {};
+        snap.forEach(function(child) {
+          var m = child.val();
+          if (m.replyTo && m.replyTo.username === oldName) {
+            updates[child.key + '/replyTo/username'] = newName;
+          }
+        });
+        if (Object.keys(updates).length > 0) db.ref('chat/rooms/' + roomCode).update(updates);
+      });
+    }
   }
 }
 
@@ -2859,7 +2894,9 @@ function registerUsername(name) {
   if (!db) return;
   var updates = {};
   updates['usernames/' + name.toLowerCase()] = myUserId;
-  updates['users/' + myUserId] = { username: name, secret: mySecretCode, lastSeen: firebase.database.ServerValue.TIMESTAMP };
+  updates['users/' + myUserId + '/username'] = name;
+  updates['users/' + myUserId + '/secret'] = mySecretCode;
+  updates['users/' + myUserId + '/lastSeen'] = firebase.database.ServerValue.TIMESTAMP;
   db.ref().update(updates);
 }
 
