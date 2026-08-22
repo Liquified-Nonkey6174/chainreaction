@@ -427,7 +427,7 @@
 <!-- LOCAL SCREEN -->
 <div id="local-screen" style="display:none;">
 
-<button class="btn" onclick="goMainMenu()" style="position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;">← Menu</button>
+<button class="btn" onclick="menuPress()" style="position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;">← Menu</button>
 
 <h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Chain Reaction</h1>
 
@@ -482,7 +482,7 @@
 
 <!-- PLAYGROUND SCREEN -->
 <div id="playground-screen" style="display:none;">
-<button class="btn" onclick="goMainMenu()" style="position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;">← Menu</button>
+<button class="btn" onclick="menuPress()" style="position:fixed;top:12px;left:12px;z-index:40;padding:7px 14px;font-size:12px;">← Menu</button>
 <h1 style="text-align:center;font-family:'Georgia','Times New Roman',serif;font-size:2.2rem;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,0.2);letter-spacing:-0.02em;">Playground</h1>
 <div class="row">
   <span class="label">Grid:</span>
@@ -1734,6 +1734,15 @@ function startPlayground() {
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
 }
 
+function menuPress() {
+  if (gameMode === 'online' && gameStarted) {
+    if (!confirm('Leave the game? You will forfeit.')) return;
+    olLeave();
+    return;
+  }
+  goMainMenu();
+}
+
 function goMainMenu() {
   var ls = document.getElementById('local-screen'); if (ls) ls.style.display = 'none';
   setDisplay('local-settings', '');
@@ -1742,6 +1751,7 @@ function goMainMenu() {
   var ov = document.getElementById('overlay'); if (ov) ov.style.display = 'none';
   var dp = document.getElementById('death-panel'); if (dp) dp.style.display = 'none';
   var oi = document.getElementById('online-info'); if (oi) oi.style.display = 'none';
+  var sl = $('spectator-list'); if (sl) sl.remove();
   hideOLPanels();
   showRoomChatTab(false);
   playgroundMode = false;
@@ -1784,11 +1794,9 @@ function dismissDeath() {
 function playAgain() {
   if (gameMode === 'online') {
     if (isHost) {
-      // Re-scan presence and publish newgame with updated slots
       channel.presence.get(function(err, members) {
         if (err) return;
         var humans = members.filter(function(m) {
-          // Include if not a spectator, OR if spectator who wants to play
           return !m.data.spectator || m.data.wantsToPlay;
         });
         var slotMap = [];
@@ -1796,7 +1804,16 @@ function playAgain() {
           slotMap.push({ clientId: humans[i].clientId, name: humans[i].data.name || 'Player', slot: i });
         }
         var totalPlayers = slotMap.length + olAIs;
-        channel.publish('newgame', { slotMap: slotMap, numPlayers: totalPlayers, numAIs: olAIs, size: SIZE, randomizeEnabled: randomizeEnabled });
+        // Build a fresh colorMap — humans keep spread colors, AIs get random
+        var newColorMap = [];
+        var usedColors = {};
+        for (var i = 0; i < totalPlayers; i++) {
+          var ci = (i * 7) % COLORS.length;
+          while (usedColors[ci]) ci = (ci + 1) % COLORS.length;
+          newColorMap.push(ci);
+          usedColors[ci] = true;
+        }
+        channel.publish('newgame', { slotMap: slotMap, numPlayers: totalPlayers, numAIs: olAIs, size: SIZE, randomizeEnabled: randomizeEnabled, colorMap: newColorMap });
       });
     }
   } else {
@@ -2285,6 +2302,7 @@ function onOLStart(msg) {
   document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   olScheduleAI();
+  updateSpectatorList();
 }
 
 function onOLNewGame() {
@@ -2412,12 +2430,45 @@ function olShowWin(p) {
   }
   lb += '</div>';
   sub.innerHTML = lb;
+  // Remove old host settings
+  var oldS = document.querySelector('.win-host-settings'); if (oldS) oldS.remove();
   var paBtn = document.getElementById('play-again-btn');
   if (isHost) {
     paBtn.textContent = 'Play again';
     paBtn.style.opacity = '';
     paBtn.style.cursor = '';
     paBtn.style.display = '';
+    // Add host settings below play again button
+    var settingsDiv = document.createElement('div');
+    settingsDiv.className = 'win-host-settings';
+    settingsDiv.style.cssText = 'margin-top:8px;font-size:12px;text-align:center;';
+    settingsDiv.innerHTML = '<div style="margin-bottom:4px;font-weight:600;opacity:0.6;">Next game settings</div>' +
+      '<div style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
+      '<label>AIs: <select id="ol-win-ais" style="padding:2px 6px;border-radius:6px;border:1px solid #ddd;font-size:12px;"></select></label>' +
+      '<label>Grid: <select id="ol-win-size" style="padding:2px 6px;border-radius:6px;border:1px solid #ddd;font-size:12px;"></select></label>' +
+      '</div>';
+    var card = document.querySelector('.win-card');
+    if (card) card.appendChild(settingsDiv);
+    // Populate AI select
+    var aiSel = $('ol-win-ais');
+    if (aiSel) {
+      for (var a = 0; a <= 60; a++) {
+        var opt = document.createElement('option'); opt.value = a; opt.textContent = a;
+        if (a === olAIs) opt.selected = true;
+        aiSel.appendChild(opt);
+      }
+      aiSel.onchange = function() { olAIs = parseInt(this.value) || 0; };
+    }
+    // Populate size select
+    var sizeSel = $('ol-win-size');
+    if (sizeSel) {
+      for (var s = 0; s < SIZES.length; s++) {
+        var opt = document.createElement('option'); opt.value = SIZES[s]; opt.textContent = SIZES[s] + '×' + SIZES[s];
+        if (SIZES[s] === SIZE) opt.selected = true;
+        sizeSel.appendChild(opt);
+      }
+      sizeSel.onchange = function() { SIZE = parseInt(this.value) || 5; };
+    }
   } else {
     paBtn.textContent = 'Waiting for host…';
     paBtn.style.opacity = '0.5';
@@ -2830,6 +2881,13 @@ function setUsername() {
         playerNames[mySlot] = myUsername;
         if (channel) channel.presence.update({ name: myName, host: isHost, spectator: isSpectator });
         renderPlayerBar();
+        renderSideLB();
+      }
+      // Also update local game names
+      if (gameMode === 'local' && gameStarted && mySlot >= 0) {
+        playerNames[mySlot] = myUsername;
+        renderPlayerBar();
+        renderSideLB();
       }
       // Pre-fill online name inputs
       var ci = document.getElementById('ol-create-name');
@@ -3063,13 +3121,48 @@ var wantsToPlay = true; // spectators can toggle this
 function toggleWantsToPlay() {
   wantsToPlay = !wantsToPlay;
   if (channel) channel.presence.update({ name: myName, host: isHost, spectator: isSpectator, wantsToPlay: wantsToPlay });
+  updateSpectatorUI();
+}
+
+function updateSpectatorUI() {
   var oi = $('online-info');
   if (oi && isSpectator) {
+    var btnStyle = wantsToPlay
+      ? 'padding:6px 16px;font-size:13px;font-weight:700;border-radius:10px;background:#6ecf6e;color:#fff;'
+      : 'padding:6px 16px;font-size:13px;font-weight:700;border-radius:10px;background:rgba(255,255,255,0.25);';
     oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectating</span> ' +
-      '<button class="btn" onclick="toggleWantsToPlay()" style="padding:3px 10px;font-size:10px;">' +
-      (wantsToPlay ? '✓ Join next game' : '✗ Stay spectating') + '</button> ' +
+      '<button class="btn" onclick="toggleWantsToPlay()" style="' + btnStyle + '">' +
+      (wantsToPlay ? '✅ Joining next game' : '👁 Staying as spectator') + '</button> ' +
       '<button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   }
+  updateSpectatorList();
+}
+
+function updateSpectatorList() {
+  if (gameMode !== 'online' || !channel) return;
+  channel.presence.get(function(err, members) {
+    if (err || !members) return;
+    var specs = [];
+    for (var i = 0; i < members.length; i++) {
+      if (members[i].data && members[i].data.spectator) {
+        specs.push(members[i].data.name || 'Anon');
+      }
+    }
+    var el = $('spectator-list');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'spectator-list';
+      el.style.cssText = 'text-align:center;font-size:11px;opacity:0.6;margin-bottom:0.3rem;';
+      var oi = $('online-info');
+      if (oi) oi.parentNode.insertBefore(el, oi.nextSibling);
+    }
+    if (specs.length > 0) {
+      el.innerHTML = '👁 ' + specs.length + ' spectating: ' + specs.map(function(s) { return escHtml(s); }).join(', ');
+      el.style.display = '';
+    } else {
+      el.style.display = 'none';
+    }
+  });
 }
 
 // ======== HOST TRANSFER ========
@@ -3277,7 +3370,7 @@ function onSyncReceived(msg) {
   setDisplay('local-settings', 'none');
   setDisplay('online-info', '');
   document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectating</span> ' +
-    '<button class="btn" onclick="toggleWantsToPlay()" style="padding:3px 10px;font-size:10px;">' + (wantsToPlay ? '✓ Join next game' : '✗ Stay spectating') + '</button> ' +
+    '<button class="btn" onclick="toggleWantsToPlay()" style="padding:6px 16px;font-size:13px;font-weight:700;border-radius:10px;">' + (wantsToPlay ? '✅ Joining next game' : '👁 Staying as spectator') + '</button> ' +
     '<button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
 }
@@ -3324,6 +3417,7 @@ updateOLLobby = function() {
     } else {
       document.getElementById('ol-lob-info').textContent = onlinePlayers.length + ' players in room';
     }
+    if (gameStarted) updateSpectatorList();
   });
 };
 
@@ -3365,7 +3459,7 @@ onOLNewGame = function(msg) {
     }
     // Rebuild names and AI flags
     playerNames = []; isAIPlayer = [];
-    defaultColorMap();
+    if (d.colorMap) { colorMap = d.colorMap; } else { defaultColorMap(); }
     for (var i = 0; i < NUM_PLAYERS; i++) {
       if (i < d.slotMap.length) { playerNames.push(d.slotMap[i].name); isAIPlayer.push(false); }
       else { isAIPlayer.push(true); playerNames.push(PC(i).name + ' AI'); }
@@ -3377,7 +3471,7 @@ onOLNewGame = function(msg) {
         oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
       } else {
         oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectating</span> ' +
-          '<button class="btn" onclick="toggleWantsToPlay()" style="padding:3px 10px;font-size:10px;">' + (wantsToPlay ? '✓ Join next game' : '✗ Stay spectating') + '</button> ' +
+          '<button class="btn" onclick="toggleWantsToPlay()" style="padding:6px 16px;font-size:13px;font-weight:700;border-radius:10px;">' + (wantsToPlay ? '✅ Joining next game' : '👁 Staying as spectator') + '</button> ' +
           '<button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
       }
     }
