@@ -1178,12 +1178,32 @@ function buildDots(count) {
     t.appendChild(makeDot()); container.appendChild(t);
     var b = document.createElement('div'); b.className = 'dots-row';
     b.appendChild(makeDot()); b.appendChild(makeDot()); container.appendChild(b);
-  } else if (count >= 4) {
+  } else if (count === 4) {
     var t = document.createElement('div'); t.className = 'dots-row';
     t.appendChild(makeDot()); t.appendChild(makeDot()); container.appendChild(t);
     var b = document.createElement('div'); b.className = 'dots-row';
-    for (var i = 2; i < Math.min(count, 6); i++) b.appendChild(makeDot());
-    container.appendChild(b);
+    b.appendChild(makeDot()); b.appendChild(makeDot()); container.appendChild(b);
+  } else if (count === 5) {
+    var t = document.createElement('div'); t.className = 'dots-row';
+    t.appendChild(makeDot()); t.appendChild(makeDot()); container.appendChild(t);
+    var m = document.createElement('div'); m.className = 'dots-row';
+    m.appendChild(makeDot()); container.appendChild(m);
+    var b = document.createElement('div'); b.className = 'dots-row';
+    b.appendChild(makeDot()); b.appendChild(makeDot()); container.appendChild(b);
+  } else if (count === 6) {
+    var t = document.createElement('div'); t.className = 'dots-row';
+    t.appendChild(makeDot()); t.appendChild(makeDot()); container.appendChild(t);
+    var m = document.createElement('div'); m.className = 'dots-row';
+    m.appendChild(makeDot()); m.appendChild(makeDot()); container.appendChild(m);
+    var b = document.createElement('div'); b.className = 'dots-row';
+    b.appendChild(makeDot()); b.appendChild(makeDot()); container.appendChild(b);
+  } else if (count === 7) {
+    var t = document.createElement('div'); t.className = 'dots-row';
+    t.appendChild(makeDot()); t.appendChild(makeDot()); t.appendChild(makeDot()); container.appendChild(t);
+    var m = document.createElement('div'); m.className = 'dots-row';
+    m.appendChild(makeDot()); container.appendChild(m);
+    var b = document.createElement('div'); b.className = 'dots-row';
+    b.appendChild(makeDot()); b.appendChild(makeDot()); b.appendChild(makeDot()); container.appendChild(b);
   }
   return container;
 }
@@ -1633,7 +1653,10 @@ function pgUpdateCell(r, c) {
     if (dots === 1) { var row = mkRow(); row.appendChild(mkDot()); container.appendChild(row); }
     else if (dots === 2) { var row = mkRow(); row.appendChild(mkDot()); row.appendChild(mkDot()); container.appendChild(row); }
     else if (dots === 3) { var t = mkRow(); t.appendChild(mkDot()); container.appendChild(t); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
-    else { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var b = mkRow(); for (var i = 2; i < Math.min(dots, 6); i++) b.appendChild(mkDot()); container.appendChild(b); }
+    else if (dots === 4) { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
+    else if (dots === 5) { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var m = mkRow(); m.appendChild(mkDot()); container.appendChild(m); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
+    else if (dots === 6) { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var m = mkRow(); m.appendChild(mkDot()); m.appendChild(mkDot()); container.appendChild(m); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
+    else if (dots === 7) { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var m = mkRow(); m.appendChild(mkDot()); container.appendChild(m); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
     el.appendChild(container);
   }
 }
@@ -2442,23 +2465,13 @@ function olShowWin(p) {
     var settingsDiv = document.createElement('div');
     settingsDiv.className = 'win-host-settings';
     settingsDiv.style.cssText = 'margin-top:8px;font-size:12px;text-align:center;';
-    settingsDiv.innerHTML = '<div style="margin-bottom:4px;font-weight:600;opacity:0.6;">Next game settings</div>' +
-      '<div style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
-      '<label>AIs: <select id="ol-win-ais" style="padding:2px 6px;border-radius:6px;border:1px solid #ddd;font-size:12px;"></select></label>' +
-      '<label>Grid: <select id="ol-win-size" style="padding:2px 6px;border-radius:6px;border:1px solid #ddd;font-size:12px;"></select></label>' +
+    settingsDiv.innerHTML = '<div style="margin-bottom:6px;font-weight:600;opacity:0.6;">Next game settings</div>' +
+      '<div style="display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap;">' +
+      '<span style="font-weight:600;">AI: <button onclick="olAIs=Math.max(0,olAIs-1);this.parentNode.querySelector(\'.ai-val\').textContent=olAIs;" style="border:none;background:rgba(0,0,0,0.1);border-radius:6px;width:24px;height:24px;cursor:pointer;font-weight:700;">−</button> <span class="ai-val">' + olAIs + '</span> <button onclick="olAIs=Math.min(62,olAIs+1);this.parentNode.querySelector(\'.ai-val\').textContent=olAIs;" style="border:none;background:rgba(0,0,0,0.1);border-radius:6px;width:24px;height:24px;cursor:pointer;font-weight:700;">+</button></span>' +
+      '<span style="font-weight:600;">Grid: <select id="ol-win-size" style="padding:2px 6px;border-radius:6px;border:1px solid #ddd;font-size:12px;"></select></span>' +
       '</div>';
     var card = document.querySelector('.win-card');
     if (card) card.appendChild(settingsDiv);
-    // Populate AI select
-    var aiSel = $('ol-win-ais');
-    if (aiSel) {
-      for (var a = 0; a <= 60; a++) {
-        var opt = document.createElement('option'); opt.value = a; opt.textContent = a;
-        if (a === olAIs) opt.selected = true;
-        aiSel.appendChild(opt);
-      }
-      aiSel.onchange = function() { olAIs = parseInt(this.value) || 0; };
-    }
     // Populate size select
     var sizeSel = $('ol-win-size');
     if (sizeSel) {
@@ -2578,19 +2591,20 @@ function demoStep() {
   if (demoAnimating) return;
 
   demoMoves++;
-  if (demoMoves > DEMO_MAX_MOVES) { setTimeout(demoInit, 1500); clearInterval(demoTimer); return; }
+  if (demoMoves > DEMO_MAX_MOVES) { clearInterval(demoTimer); setTimeout(demoInit, 1500); return; }
+
+  // Skip dead players
+  var tries = 0;
+  while (!demoAlive[demoTurn] && tries < DEMO_PLAYERS) { demoTurn = (demoTurn + 1) % DEMO_PLAYERS; tries++; }
 
   var aliveCount = 0;
   for (var i = 0; i < DEMO_PLAYERS; i++) if (demoAlive[i]) aliveCount++;
   if (aliveCount <= 1) {
     demoStaleMoves++;
-    if (demoStaleMoves >= 10) { setTimeout(demoInit, 1500); clearInterval(demoTimer); return; }
+    if (demoStaleMoves >= 10) { clearInterval(demoTimer); setTimeout(demoInit, 1500); return; }
   } else {
     demoStaleMoves = 0;
   }
-
-  var tries = 0;
-  while (!demoAlive[demoTurn] && tries < DEMO_PLAYERS) { demoTurn = (demoTurn + 1) % DEMO_PLAYERS; tries++; }
 
   if (!demoPlaced[demoTurn]) {
     var empty = [];
@@ -2615,6 +2629,7 @@ function demoStep() {
   demoAnimating = true;
   demoProcessExplosions(function() {
     demoAnimating = false;
+    // Check eliminations after all explosions resolve
     var allP = demoPlaced.every(function(p) { return p; });
     if (allP) {
       var counts = [0,0,0,0];
@@ -2622,6 +2637,15 @@ function demoStep() {
         for (var c = 0; c < DEMO_SIZE; c++)
           if (demoBoard[r][c].owner >= 0) counts[demoBoard[r][c].owner]++;
       for (var i = 0; i < DEMO_PLAYERS; i++) if (demoPlaced[i] && counts[i] === 0) demoAlive[i] = false;
+    }
+    // Check if game should end — do it HERE after explosions, not at the top of next step
+    var ac = 0;
+    for (var i = 0; i < DEMO_PLAYERS; i++) if (demoAlive[i]) ac++;
+    if (ac <= 1 && allP) {
+      clearInterval(demoTimer);
+      setTimeout(demoInit, 1500);
+      demoRender();
+      return;
     }
     demoTurn = (demoTurn + 1) % DEMO_PLAYERS;
     demoRender();
@@ -3166,69 +3190,87 @@ function updateSpectatorList() {
 }
 
 // ======== HOST TRANSFER ========
-function transferHost(targetClientId) {
+function transferHost(targetClientId, targetName) {
   if (!isHost || !channel) return;
+  if (!confirm('Transfer host to ' + (targetName || targetClientId) + '?')) return;
   isHost = false;
-  channel.presence.update({ name: myName, host: false });
-  channel.publish('hostmigrate', { newHostId: targetClientId });
+  channel.presence.update({ name: myName, host: false, spectator: isSpectator });
+  channel.publish('hostmigrate', { newHostId: targetClientId, newHostName: targetName || '' });
+}
+
+function onHostMigrate(msg) {
+  var d = msg.data;
+  var wasHost = isHost;
+  if (d.newHostId === myClientId) {
+    isHost = true;
+    channel.presence.update({ name: myName, host: true, spectator: isSpectator });
+    // Update online info
+    var oi = $('online-info');
+    if (oi && gameStarted && !isSpectator && mySlot >= 0) {
+      oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> (Host) &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+    }
+  } else {
+    isHost = false;
+  }
+  // Update play again button
+  var paBtn = $('play-again-btn');
+  if (paBtn) {
+    if (isHost) { paBtn.textContent = 'Play again'; paBtn.style.opacity = ''; paBtn.style.cursor = ''; }
+    else { paBtn.textContent = 'Waiting for host…'; paBtn.style.opacity = '0.5'; paBtn.style.cursor = 'default'; }
+  }
+  // Update lobby controls
+  setDisplay('ol-lob-host', isHost ? '' : 'none');
+  setDisplay('ol-lob-guest', isHost ? 'none' : '');
+  // Re-render lobby list to show updated host markers
+  if (typeof updateOLLobby === 'function') updateOLLobby();
 }
 
 function onPlayerDisconnect(member) {
-  if (!gameStarted || !board) {
-    // In lobby: check if host left and migrate
-    handleHostMigration(member);
-    return;
-  }
   var cid = member.clientId;
-  // Find which slot this player had
-  for (var i = 0; i < olSlotMapStored.length; i++) {
-    if (olSlotMapStored[i].clientId === cid) {
-      var slot = olSlotMapStored[i].slot;
-      if (alive[slot]) {
-        executeForfeit(slot);
+  
+  // Forfeit if game is running
+  if (gameStarted && board) {
+    for (var i = 0; i < olSlotMapStored.length; i++) {
+      if (olSlotMapStored[i].clientId === cid) {
+        var slot = olSlotMapStored[i].slot;
+        if (alive[slot]) executeForfeit(slot);
+        break;
       }
-      break;
     }
   }
-  // Check if host left
-  handleHostMigration(member);
+  
+  // Check if they were host — try multiple sources
+  var wasHost = false;
+  if (member.data && member.data.host) wasHost = true;
+  for (var i = 0; i < onlinePlayers.length; i++) {
+    if (onlinePlayers[i].clientId === cid && onlinePlayers[i].host) wasHost = true;
+  }
+  
+  // Remove from onlinePlayers
+  onlinePlayers = onlinePlayers.filter(function(p) { return p.clientId !== cid; });
+  
+  if (wasHost) {
+    // Determine new host — first remaining member
+    channel.presence.get(function(err, members) {
+      if (err) return;
+      members = members.filter(function(m) { return m.clientId !== cid; });
+      if (members.length === 0) {
+        olLeaveLobbyChannel();
+        return;
+      }
+      if (members[0].clientId === myClientId) {
+        channel.publish('hostmigrate', { newHostId: myClientId, newHostName: myName });
+      }
+    });
+  }
+  
+  updateSpectatorList();
 }
 
-function handleHostMigration(leftMember) {
-  if (!channel) return;
-  // Check if the person who left was the host
-  var leftWasHost = false;
-  for (var i = 0; i < onlinePlayers.length; i++) {
-    if (onlinePlayers[i].clientId === leftMember.clientId && onlinePlayers[i].host) {
-      leftWasHost = true;
-      break;
-    }
-  }
-  if (!leftWasHost) return;
-
-  // Get remaining members
-  channel.presence.get(function(err, members) {
-    if (err) return;
-    if (members.length === 0) {
-      // Room is empty — clean up
-      olLeaveLobbyChannel();
-      return;
-    }
-    // First remaining member becomes host
-    var newHostId = members[0].clientId;
-    if (newHostId === myClientId) {
-      isHost = true;
-      // Update presence to mark as host
-      channel.presence.update({ name: myName, host: true });
-      // Notify all players
-      channel.publish('hostmigrate', { newHostId: newHostId, newHostName: myName });
-      // Show host controls
-      var oi = $('online-info');
-      if (oi && gameStarted) {
-        oi.innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are now <strong>Host</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
-      }
-    }
-  });
+function kickPlayer(targetClientId, targetName) {
+  if (!isHost || !channel) return;
+  if (!confirm('Kick ' + targetName + '?')) return;
+  channel.publish('kick', { targetId: targetClientId });
 }
 
 // ======== SPECTATOR SYSTEM ========
@@ -3262,18 +3304,11 @@ olJoinRoom = function() {
         renderPlayerBar(); updateUI();
       }
     });
-    channel.subscribe('hostmigrate', function(msg) {
-      var d = msg.data;
-      if (d.newHostId === myClientId) {
-        isHost = true;
-      } else {
-        isHost = false;
-      }
-      // Update play again button
-      var paBtn = $('play-again-btn');
-      if (paBtn) {
-        if (isHost) { paBtn.textContent = 'Play again'; paBtn.style.opacity = ''; paBtn.style.cursor = ''; }
-        else { paBtn.textContent = 'Waiting for host…'; paBtn.style.opacity = '0.5'; paBtn.style.cursor = 'default'; }
+    channel.subscribe('hostmigrate', onHostMigrate);
+    channel.subscribe('kick', function(msg) {
+      if (msg.data && msg.data.targetId === myClientId) {
+        alert('You have been kicked from the room.');
+        olLeave();
       }
     });
     showOLPanel('ol-lobby');
@@ -3324,10 +3359,12 @@ olCreateRoom = function() {
         });
       }
     });
-    channel.subscribe('hostmigrate', function(msg) {
-      // Host shouldn't normally receive this as they're the host, but handle migration
-      var d = msg.data;
-      if (d.newHostId === myClientId) isHost = true;
+    channel.subscribe('hostmigrate', onHostMigrate);
+    channel.subscribe('kick', function(msg) {
+      if (msg.data && msg.data.targetId === myClientId) {
+        alert('You have been kicked from the room.');
+        olLeave();
+      }
     });
     olEnterLobby();
     showRoomChatTab(true);
@@ -3401,8 +3438,14 @@ updateOLLobby = function() {
           tb.textContent = '♛';
           tb.title = 'Make host';
           tb.style.cssText = 'margin-left:6px;border:none;background:none;cursor:pointer;font-size:12px;opacity:0.4;';
-          (function(cid) { tb.onclick = function() { if (confirm('Transfer host to ' + cid + '?')) transferHost(cid); }; })(onlinePlayers[i].clientId);
+          (function(cid, pname) { tb.onclick = function() { transferHost(cid, pname); }; })(onlinePlayers[i].clientId, onlinePlayers[i].name);
           div.appendChild(tb);
+          var kb = document.createElement('button');
+          kb.textContent = '✕';
+          kb.title = 'Kick';
+          kb.style.cssText = 'margin-left:2px;border:none;background:none;cursor:pointer;font-size:12px;opacity:0.4;color:#e55;';
+          (function(cid, pname) { kb.onclick = function() { kickPlayer(cid, pname); }; })(onlinePlayers[i].clientId, onlinePlayers[i].name);
+          div.appendChild(kb);
         }
         list.appendChild(div);
       }
@@ -3485,6 +3528,11 @@ onOLNewGame = function(msg) {
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
   moveQueue = []; processing = false;
   olScheduleAI();
+  // Update presence — if we joined as player, clear spectator flag
+  if (!isSpectator && channel) {
+    channel.presence.update({ name: myName, host: isHost, spectator: false, wantsToPlay: true });
+  }
+  updateSpectatorList();
 };
 
 // Pre-fill name inputs with username
