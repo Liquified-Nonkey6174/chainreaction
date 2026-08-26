@@ -633,11 +633,16 @@ function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
 function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
 
 var SIZE = 5, NUM_HUMANS = 1, NUM_AIS = 1, NUM_PLAYERS = 2;
-var SIZES = [3, 5, 8, 10, 12, 15, 20, 30];
+var SIZES = [5, 8, 10, 12, 15, 20, 25, 30];
+
+function maxPlayersForSize(n) {
+  var c = Math.ceil(n / 3);
+  return Math.min(c * c, 64);
+}
 var board, turn, animating;
 var placed, alive, wins;
 
-function maxPlayers() { return Math.min(64, SIZE * SIZE); }
+function maxPlayers() { return maxPlayersForSize(SIZE); }
 
 function buildPlayerButtons() {
   var c = document.getElementById('player-btns'); c.innerHTML = '';
@@ -1032,6 +1037,7 @@ function applyCellSize() {
   else if (SIZE <= 12) { cs = 40; ds = 12; g = 3; }
   else if (SIZE <= 15) { cs = 36; ds = 11; g = 3; }
   else if (SIZE <= 20) { cs = 34; ds = 10; g = 5; }
+  else if (SIZE <= 25) { cs = 30; ds = 9; g = 4; }
   else { cs = 28; ds = 8; g = 4; }
   document.documentElement.style.setProperty('--cell', cs + 'px');
   document.documentElement.style.setProperty('--dot-size', ds + 'px');
@@ -1349,8 +1355,11 @@ function doMove(r, c) {
   var cell = board[r][c];
   if (!placed[turn]) {
     if (cell.owner >= 0) return;
+    if (isBlockedByRadius(r, c)) return;
     cell.owner = turn; cell.dots = 3; placed[turn] = true;
     updateCell(r, c); updateCounts();
+    if (allPlaced()) clearBlockedSquares();
+    else updateBlockedSquares();
     processExplosions(function() {
       if (!playgroundMode && allPlaced() && checkWin()) return;
       advanceTurn();
@@ -1369,6 +1378,46 @@ function doMove(r, c) {
 function allPlaced() {
   for (var i = 0; i < NUM_PLAYERS; i++) if (!placed[i]) return false;
   return true;
+}
+
+function isBlockedByRadius(r, c) {
+  // During round 0 (initial placement), squares adjacent/diagonal to any placed piece are blocked
+  if (allPlaced()) return false;
+  for (var dr = -1; dr <= 1; dr++) {
+    for (var dc = -1; dc <= 1; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      var nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE) {
+        if (board[nr][nc].owner >= 0) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function updateBlockedSquares() {
+  if (allPlaced() || playgroundMode) return;
+  for (var r = 0; r < SIZE; r++) {
+    for (var c = 0; c < SIZE; c++) {
+      var el = document.getElementById('c-' + r + '-' + c);
+      if (!el) continue;
+      if (board[r][c].owner >= 0) continue;
+      if (isBlockedByRadius(r, c)) {
+        el.style.opacity = '0.4';
+      } else {
+        el.style.opacity = '';
+      }
+    }
+  }
+}
+
+function clearBlockedSquares() {
+  for (var r = 0; r < SIZE; r++) {
+    for (var c = 0; c < SIZE; c++) {
+      var el = document.getElementById('c-' + r + '-' + c);
+      if (el) el.style.opacity = '';
+    }
+  }
 }
 
 function advanceTurn() {
@@ -1394,7 +1443,7 @@ function aiMove() {
     var empty = [];
     for (var r = 0; r < SIZE; r++)
       for (var c = 0; c < SIZE; c++)
-        if (board[r][c].owner < 0) empty.push([r, c]);
+        if (board[r][c].owner < 0 && !isBlockedByRadius(r, c)) empty.push([r, c]);
     if (empty.length === 0) return;
     var pick = empty[Math.floor(Math.random() * empty.length)];
     doMove(pick[0], pick[1]); return;
@@ -1438,7 +1487,7 @@ function processExplosions(done) {
   setTimeout(function() {
     if (gen !== gameGeneration) return; // stale callback from old game
     animating = false;
-    if (!playgroundMode && allPlaced() && checkWin()) return;
+    if (!playgroundMode && gameMode !== 'online' && allPlaced() && checkWin()) return;
     processExplosions(done);
   }, delay);
 }
@@ -2019,7 +2068,7 @@ function buildOLSizeRow(containerId, current, cb) {
     c.appendChild(b);
   });
 }
-function olMaxPlayers() { return Math.min(64, olSize * olSize); }
+function olMaxPlayers() { return maxPlayersForSize(olSize); }
 function buildOLCreateBtns() {
   var mp = olMaxPlayers();
   if (olHumans + olAIs > mp) { olAIs = Math.max(0, mp - olHumans); if (olHumans > mp) olHumans = mp; }
@@ -2290,9 +2339,12 @@ function onOLStart(msg) {
   olSlotMapStored = d.slotMap || [];
   for (var i = 0; i < d.slotMap.length; i++) if (d.slotMap[i].clientId === myClientId) { mySlot = d.slotMap[i].slot; break; }
   wins = []; for (var i = 0; i < COLORS.length; i++) wins.push(0);
-  // Apply colour map
-  if (d.colorMap && d.colorMap.length > 0) {
-    colorMap = d.colorMap.slice();
+  // Apply colour map - force array conversion
+  if (d.colorMap) {
+    colorMap = [];
+    for (var i = 0; i < d.numPlayers; i++) {
+      colorMap.push(d.colorMap[i] !== undefined ? d.colorMap[i] : i);
+    }
   } else {
     defaultColorMap();
   }
@@ -2355,8 +2407,11 @@ function olExecuteMove(r, c, cb) {
   var cell = board[r][c];
   if (!placed[turn]) {
     if (cell.owner >= 0) { if (cb) cb(); return; }
+    if (isBlockedByRadius(r, c)) { if (cb) cb(); return; }
     cell.owner = turn; cell.dots = 3; placed[turn] = true;
     updateCell(r, c); updateCounts();
+    if (allPlaced()) clearBlockedSquares();
+    else updateBlockedSquares();
     processExplosions(function() {
       if (allPlaced() && olCheckWin()) { if (cb) cb(); return; }
       olAdvanceTurn(); if (cb) cb();
@@ -2398,7 +2453,7 @@ function olDoAI() {
   var pick;
   if (!placed[turn]) {
     var empty = [];
-    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (board[r][c].owner < 0) empty.push([r, c]);
+    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (board[r][c].owner < 0 && !isBlockedByRadius(r, c)) empty.push([r, c]);
     if (!empty.length) return;
     pick = empty[Math.floor(Math.random() * empty.length)];
   } else {
@@ -2543,7 +2598,7 @@ handleClick = function(r, c) {
     if (animating) return;
     if (turn !== mySlot || isAI(turn)) return;
     var cell = board[r][c];
-    if (!placed[turn]) { if (cell.owner >= 0) return; }
+    if (!placed[turn]) { if (cell.owner >= 0) return; if (isBlockedByRadius(r, c)) return; }
     else { if (cell.owner !== turn) return; }
     channel.publish('move', { r: r, c: c, player: turn });
     return;
@@ -2603,6 +2658,19 @@ var DEMO_COLORS = [0, 33, 21, 14]; // Red, Blue, Green, Gold
 var demoMoves = 0, DEMO_MAX_MOVES = 120;
 var demoStaleMoves = 0;
 
+function demoIsBlocked(r, c) {
+  for (var dr = -1; dr <= 1; dr++) {
+    for (var dc = -1; dc <= 1; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      var nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < DEMO_SIZE && nc >= 0 && nc < DEMO_SIZE) {
+        if (demoBoard[nr][nc].owner >= 0) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function demoInit() {
   demoBoard = [];
   for (var r = 0; r < DEMO_SIZE; r++) {
@@ -2644,7 +2712,13 @@ function demoStep() {
     var empty = [];
     for (var r = 0; r < DEMO_SIZE; r++)
       for (var c = 0; c < DEMO_SIZE; c++)
-        if (demoBoard[r][c].owner < 0) empty.push([r, c]);
+        if (demoBoard[r][c].owner < 0 && !demoIsBlocked(r, c)) empty.push([r, c]);
+    if (empty.length === 0) {
+      // Try without restriction as fallback
+      for (var r = 0; r < DEMO_SIZE; r++)
+        for (var c = 0; c < DEMO_SIZE; c++)
+          if (demoBoard[r][c].owner < 0) empty.push([r, c]);
+    }
     if (empty.length === 0) return;
     var pick = empty[Math.floor(Math.random() * empty.length)];
     demoBoard[pick[0]][pick[1]] = { owner: demoTurn, dots: 3 };
@@ -3536,7 +3610,12 @@ onOLNewGame = function(msg) {
     }
     // Rebuild names and AI flags
     playerNames = []; isAIPlayer = [];
-    if (d.colorMap && d.colorMap.length > 0) { colorMap = d.colorMap.slice(); } else { defaultColorMap(); }
+    if (d.colorMap) {
+      colorMap = [];
+      for (var i = 0; i < NUM_PLAYERS; i++) {
+        colorMap.push(d.colorMap[i] !== undefined ? d.colorMap[i] : i);
+      }
+    } else { defaultColorMap(); }
     for (var i = 0; i < NUM_PLAYERS; i++) {
       if (i < d.slotMap.length) { playerNames.push(d.slotMap[i].name); isAIPlayer.push(false); }
       else { isAIPlayer.push(true); playerNames.push(PC(i).name + ' AI'); }
