@@ -2903,7 +2903,16 @@ if (!mySecretCode) {
   for (var _i = 0; _i < 10; _i++) mySecretCode += Math.floor(Math.random() * 10);
   localStorage.setItem('cr-secret', mySecretCode);
 }
+// Browser fingerprint to limit multi-accounting
+var browserFingerprint = (function() {
+  var s = navigator.userAgent + screen.width + 'x' + screen.height + screen.colorDepth + new Date().getTimezoneOffset();
+  var hash = 0;
+  for (var i = 0; i < s.length; i++) { hash = ((hash << 5) - hash) + s.charCodeAt(i); hash |= 0; }
+  return 'fp_' + Math.abs(hash).toString(36);
+})();
 var usernameEditing = false;
+var lastUsernameChange = 0;
+var USERNAME_COOLDOWN = 30000; // 30 seconds between changes
 
 // ======== BLOCK LIST (admin can block a device's 10-digit code) ========
 var amBlocked = false;
@@ -2977,20 +2986,46 @@ function setUsername() {
   var name = inp.value.trim();
   if (!name || name.length < 1) return;
   if (!db) { localStorage.setItem('cr-prev-username', myUsername); myUsername = name; localStorage.setItem('cr-username', myUsername); showUsername(myUsername); updateChatUsernameNotice(); loadChat(); prefillNames(); return; }
+  
+  // Check if this fingerprint already has an account with a different userId
+  db.ref('fingerprints/' + browserFingerprint).once('value', function(fpSnap) {
+    var existingUserId = fpSnap.exists() ? fpSnap.val().userId : null;
+    if (existingUserId && existingUserId !== myUserId) {
+      // This device already has an account — adopt it
+      var oldId = myUserId;
+      myUserId = existingUserId;
+      localStorage.setItem('cr-userId', myUserId);
+      // Load existing username
+      db.ref('users/' + myUserId + '/username').once('value', function(uSnap) {
+        if (uSnap.exists() && uSnap.val()) {
+          myUsername = uSnap.val();
+          localStorage.setItem('cr-username', myUsername);
+          showUsername(myUsername);
+          updateChatUsernameNotice();
+          loadChat();
+          alert('Welcome back! Your account "' + myUsername + '" was restored.');
+          return;
+        }
+        // No username on existing account, proceed normally
+        doSetUsername(name);
+      });
+      return;
+    }
+    doSetUsername(name);
+  });
+}
+
+function doSetUsername(name) {
   // Check uniqueness
   db.ref('usernames/' + name.toLowerCase()).once('value', function(snap) {
     if (snap.exists() && snap.val() !== myUserId) {
       alert('Username "' + name + '" is taken. Try another.');
       return;
     }
-    // Release old name and claim the new one as a single atomic write, so a
-    // dropped connection can't release the old claim without the new one
-    // landing (or vice versa) and leave an orphaned duplicate behind.
     var isRename = myUsername && myUsername.toLowerCase() !== name.toLowerCase();
     var updates = {};
     if (isRename) {
       updates['usernames/' + myUsername.toLowerCase()] = null;
-      // Log the outgoing name to this user's rename history before overwriting it.
       var histKey = db.ref('users/' + myUserId + '/history').push().key;
       updates['users/' + myUserId + '/history/' + histKey] = { name: myUsername, changedAt: firebase.database.ServerValue.TIMESTAMP };
     }
@@ -2998,6 +3033,8 @@ function setUsername() {
     updates['users/' + myUserId + '/username'] = name;
     updates['users/' + myUserId + '/secret'] = mySecretCode;
     updates['users/' + myUserId + '/lastSeen'] = firebase.database.ServerValue.TIMESTAMP;
+    updates['users/' + myUserId + '/fingerprint'] = browserFingerprint;
+    updates['fingerprints/' + browserFingerprint] = { userId: myUserId, lastSeen: firebase.database.ServerValue.TIMESTAMP };
     db.ref().update(updates).then(function() {
       localStorage.setItem('cr-prev-username', myUsername);
       myUsername = name;
@@ -3086,7 +3123,9 @@ function registerUsername(name) {
   updates['usernames/' + name.toLowerCase()] = myUserId;
   updates['users/' + myUserId + '/username'] = name;
   updates['users/' + myUserId + '/secret'] = mySecretCode;
+  updates['users/' + myUserId + '/fingerprint'] = browserFingerprint;
   updates['users/' + myUserId + '/lastSeen'] = firebase.database.ServerValue.TIMESTAMP;
+  updates['fingerprints/' + browserFingerprint] = { userId: myUserId, lastSeen: firebase.database.ServerValue.TIMESTAMP };
   db.ref().update(updates);
 }
 
