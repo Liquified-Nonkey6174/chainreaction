@@ -391,6 +391,25 @@
   }
   .chat-input-row button:hover { filter: brightness(1.1); }
 
+  /* ANNOUNCEMENTS */
+  .announce-section {
+    width: 100%; max-width: 500px; margin: 0 auto 1.5rem;
+  }
+  .announce-card {
+    background: var(--ui-bg); border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12); overflow: hidden;
+    color: var(--text-dark);
+  }
+  .announce-title {
+    padding: 10px 14px; font-size: 12px; font-weight: 700;
+    border-bottom: 1px solid #eee; color: var(--text-dark);
+  }
+  .announce-body {
+    padding: 12px 14px; font-size: 13px; line-height: 1.55;
+    white-space: pre-wrap; word-wrap: break-word;
+    max-height: 220px; overflow-y: auto;
+  }
+
   .spectator-badge {
     font-size: 10px; background: rgba(255,255,255,0.2); padding: 2px 8px;
     border-radius: 10px; margin-left: 4px; font-weight: 500;
@@ -439,6 +458,10 @@
 <div class="row">
   <span class="label">AIs:</span>
   <div id="ai-btns" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;"></div>
+</div>
+<div class="row">
+  <span class="label">AI difficulty:</span>
+  <div id="difficulty-btns" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;"></div>
 </div>
 <div class="row">
   <span class="label">Grid:</span>
@@ -634,6 +657,189 @@ function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i
 
 var SIZE = 5, NUM_HUMANS = 1, NUM_AIS = 1, NUM_PLAYERS = 2;
 var SIZES = [5, 8, 10, 12, 15, 20, 25, 30];
+var AI_DIFFICULTY = 'random';
+var AI_DIFFICULTIES = ['dumbass', 'random', 'subhuman', 'human'];
+var AI_DIFFICULTY_LABELS = { dumbass: 'Dumbass', random: 'Random', subhuman: 'Subhuman', human: 'Human' };
+
+function buildDifficultyButtons() {
+  var c = document.getElementById('difficulty-btns');
+  if (!c) return;
+  c.innerHTML = '';
+  for (var i = 0; i < AI_DIFFICULTIES.length; i++) {
+    var d = AI_DIFFICULTIES[i];
+    var b = document.createElement('button');
+    b.className = 'btn' + (d === AI_DIFFICULTY ? ' active' : '');
+    b.textContent = AI_DIFFICULTY_LABELS[d];
+    (function(dd) {
+      b.onclick = function() { AI_DIFFICULTY = dd; buildDifficultyButtons(); };
+    })(d);
+    c.appendChild(b);
+  }
+}
+
+// --- AI move selection (own-cell phase), keyed by difficulty ---
+function aiOrthoNeighbors(r, c, size) {
+  var dirs = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
+  var res = [];
+  for (var i = 0; i < dirs.length; i++) {
+    var nr = dirs[i][0], nc = dirs[i][1];
+    if (nr >= 0 && nr < size && nc >= 0 && nc < size) res.push([nr, nc]);
+  }
+  return res;
+}
+
+function aiAdjacentToOpponentThree(b, size, r, c, turn) {
+  var nbrs = aiOrthoNeighbors(r, c, size);
+  for (var i = 0; i < nbrs.length; i++) {
+    var cell = b[nbrs[i][0]][nbrs[i][1]];
+    if (cell.owner >= 0 && cell.owner !== turn && cell.dots === 3) return true;
+  }
+  return false;
+}
+
+// Estimates chain-reaction length by measuring the connected cluster of
+// dots===3 cells reachable from (r,c) — a click here would cascade through
+// the whole cluster since each captured 3 immediately re-explodes.
+function aiEstimateChainLength(b, size, r, c) {
+  var visited = {};
+  var stack = [[r, c]];
+  var count = 0;
+  while (stack.length) {
+    var cur = stack.pop();
+    var key = cur[0] + ',' + cur[1];
+    if (visited[key]) continue;
+    visited[key] = true;
+    if (b[cur[0]][cur[1]].dots !== 3) continue;
+    count++;
+    var nbrs = aiOrthoNeighbors(cur[0], cur[1], size);
+    for (var i = 0; i < nbrs.length; i++) {
+      var k2 = nbrs[i][0] + ',' + nbrs[i][1];
+      if (!visited[k2]) stack.push(nbrs[i]);
+    }
+  }
+  return count;
+}
+
+function aiPickCapture(own, b, size, turn) {
+  var threeAdj = own.filter(function(p) { return b[p[0]][p[1]].dots === 3 && aiAdjacentToOpponentThree(b, size, p[0], p[1], turn); });
+  if (!threeAdj.length) return null;
+  var bestLen = -1, best = [];
+  for (var i = 0; i < threeAdj.length; i++) {
+    var len = aiEstimateChainLength(b, size, threeAdj[i][0], threeAdj[i][1]);
+    if (len > bestLen) { bestLen = len; best = [threeAdj[i]]; }
+    else if (len === bestLen) best.push(threeAdj[i]);
+  }
+  return best[Math.floor(Math.random() * best.length)];
+}
+
+// Cells at EXACT taxicab (Manhattan) distance 2 — 2 squares away in a
+// straight line, or 1 square away diagonally.
+function aiTaxicabTwoCells(r, c, size) {
+  var offsets = [[-2,0],[2,0],[0,-2],[0,2],[-1,-1],[-1,1],[1,-1],[1,1]];
+  var res = [];
+  for (var i = 0; i < offsets.length; i++) {
+    var nr = r + offsets[i][0], nc = c + offsets[i][1];
+    if (nr >= 0 && nr < size && nc >= 0 && nc < size) res.push([nr, nc]);
+  }
+  return res;
+}
+
+// A 3 is "solitary" if no other 3-dot cell sits exactly 2 squares away
+// taxicab-wise — i.e. nothing positioned to recapture the cell it's about
+// to grab.
+function aiIsSolitaryThree(b, size, r, c) {
+  var cells = aiTaxicabTwoCells(r, c, size);
+  for (var i = 0; i < cells.length; i++) {
+    if (b[cells[i][0]][cells[i][1]].dots === 3) return false;
+  }
+  return true;
+}
+
+function aiHasAdjacentOpponentTwo(b, size, r, c, turn) {
+  var nbrs = aiOrthoNeighbors(r, c, size);
+  for (var i = 0; i < nbrs.length; i++) {
+    var cell = b[nbrs[i][0]][nbrs[i][1]];
+    if (cell.owner >= 0 && cell.owner !== turn && cell.dots === 2) return true;
+  }
+  return false;
+}
+
+// Finds own 3s that can safely grab an adjacent opponent 2 — solitary (no
+// 3 two squares away that could snipe the capture back) with an opponent's
+// 2 one square away. This is what keeps it from taking a 2 that's
+// protected by a 3.
+function aiPickSafeTwoCapture(own, b, size, turn) {
+  var candidates = own.filter(function(p) {
+    return b[p[0]][p[1]].dots === 3 && aiIsSolitaryThree(b, size, p[0], p[1]) && aiHasAdjacentOpponentTwo(b, size, p[0], p[1], turn);
+  });
+  if (!candidates.length) return null;
+  var bestLen = -1, best = [];
+  for (var i = 0; i < candidates.length; i++) {
+    var len = aiEstimateChainLength(b, size, candidates[i][0], candidates[i][1]);
+    if (len > bestLen) { bestLen = len; best = [candidates[i]]; }
+    else if (len === bestLen) best.push(candidates[i]);
+  }
+  return best[Math.floor(Math.random() * best.length)];
+}
+
+function pickAIOwnCell(b, size, turn, difficulty) {
+  var own = [];
+  for (var r = 0; r < size; r++)
+    for (var c = 0; c < size; c++)
+      if (b[r][c].owner === turn) own.push([r, c]);
+  if (own.length === 0) return null;
+
+  if (difficulty === 'dumbass') {
+    // Always tries to upgrade a 2 to a 3 if it's next to an opponent's 3 (walks into danger).
+    var twoAdj = own.filter(function(p) { return b[p[0]][p[1]].dots === 2 && aiAdjacentToOpponentThree(b, size, p[0], p[1], turn); });
+    if (twoAdj.length) return twoAdj[Math.floor(Math.random() * twoAdj.length)];
+    // Never clicks a 3 next to an opponent's 3 if it can help it (avoids the good capture).
+    var safe = own.filter(function(p) { return !(b[p[0]][p[1]].dots === 3 && aiAdjacentToOpponentThree(b, size, p[0], p[1], turn)); });
+    var pool = safe.length ? safe : own;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  if (difficulty === 'subhuman') {
+    // Only priority: always clicks a 3 next to an opponent's 3 — picks whichever starts the longest chain.
+    var capture = aiPickCapture(own, b, size, turn);
+    if (capture) return capture;
+    // Otherwise, plain random.
+    return own[Math.floor(Math.random() * own.length)];
+  }
+
+  if (difficulty === 'human') {
+    // 3dot-3dot capture takes top priority.
+    var capture = aiPickCapture(own, b, size, turn);
+    if (capture) return capture;
+    // Next, safely grab an opponent's 2 with a solitary 3 (one that can't
+    // be sniped back by a 3 sitting 2 squares away).
+    var twoCapture = aiPickSafeTwoCapture(own, b, size, turn);
+    if (twoCapture) return twoCapture;
+    // Otherwise, if an own 2 is threatened by an opponent's 3, defend it by
+    // upgrading another own 2 that's adjacent to the threatened cell to a 3.
+    var threatenedTwos = own.filter(function(p) { return b[p[0]][p[1]].dots === 2 && aiAdjacentToOpponentThree(b, size, p[0], p[1], turn); });
+    if (threatenedTwos.length) {
+      var defenders = own.filter(function(p) {
+        if (b[p[0]][p[1]].dots !== 2) return false;
+        var nbrs = aiOrthoNeighbors(p[0], p[1], size);
+        for (var j = 0; j < nbrs.length; j++) {
+          for (var k = 0; k < threatenedTwos.length; k++) {
+            if (threatenedTwos[k][0] === nbrs[j][0] && threatenedTwos[k][1] === nbrs[j][1]) return true;
+          }
+        }
+        return false;
+      });
+      if (defenders.length) return defenders[Math.floor(Math.random() * defenders.length)];
+    }
+    // Never upgrades a 2 to 3 next to an opponent's 3 if it can help it.
+    var safe = own.filter(function(p) { return !(b[p[0]][p[1]].dots === 2 && aiAdjacentToOpponentThree(b, size, p[0], p[1], turn)); });
+    var pool = safe.length ? safe : own;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  // random (default)
+  return own[Math.floor(Math.random() * own.length)];
+}
 
 function maxPlayersForSize(n) {
   var c = Math.ceil(n / 3);
@@ -1381,14 +1587,19 @@ function allPlaced() {
 }
 
 function isBlockedByRadius(r, c) {
-  // During round 0 (initial placement), squares adjacent/diagonal to any placed piece are blocked
   if (allPlaced()) return false;
-  for (var dr = -1; dr <= 1; dr++) {
-    for (var dc = -1; dc <= 1; dc++) {
+  for (var dr = -2; dr <= 2; dr++) {
+    for (var dc = -2; dc <= 2; dc++) {
       if (dr === 0 && dc === 0) continue;
-      var nr = r + dr, nc = c + dc;
-      if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE) {
-        if (board[nr][nc].owner >= 0) return true;
+      // 2 squares in cardinal (left/right/up/down), 1 square diagonal
+      var isCardinal = (dr === 0 || dc === 0);
+      var dist = Math.abs(dr) + Math.abs(dc);
+      if (isCardinal && dist <= 2) {
+        var nr = r + dr, nc = c + dc;
+        if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && board[nr][nc].owner >= 0) return true;
+      } else if (!isCardinal && Math.abs(dr) <= 1 && Math.abs(dc) <= 1) {
+        var nr = r + dr, nc = c + dc;
+        if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && board[nr][nc].owner >= 0) return true;
       }
     }
   }
@@ -1448,12 +1659,8 @@ function aiMove() {
     var pick = empty[Math.floor(Math.random() * empty.length)];
     doMove(pick[0], pick[1]); return;
   }
-  var own = [];
-  for (var r = 0; r < SIZE; r++)
-    for (var c = 0; c < SIZE; c++)
-      if (board[r][c].owner === turn) own.push([r, c]);
-  if (own.length === 0) return;
-  var pick = own[Math.floor(Math.random() * own.length)];
+  var pick = pickAIOwnCell(board, SIZE, turn, AI_DIFFICULTY);
+  if (!pick) return;
   doMove(pick[0], pick[1]);
 }
 
@@ -1791,7 +1998,7 @@ function showLocalScreen() {
   setDisplay('local-screen', '');
   playgroundMode = false;
   gameStarted = false;
-  buildPlayerButtons(); buildAIButtons(); buildSizeButtons();
+  buildPlayerButtons(); buildAIButtons(); buildSizeButtons(); buildDifficultyButtons();
   initBoard(); applyCellSize(); renderGrid();
 }
 
@@ -2068,6 +2275,14 @@ function buildOLSizeRow(containerId, current, cb) {
     c.appendChild(b);
   });
 }
+function buildOLDifficultyRow(containerId) {
+  var c = document.getElementById(containerId); if (!c) return; c.innerHTML = '';
+  AI_DIFFICULTIES.forEach(function(d) {
+    var b = document.createElement('button'); b.className = 'sbtn' + (d === AI_DIFFICULTY ? ' active' : ''); b.textContent = AI_DIFFICULTY_LABELS[d];
+    b.onclick = function() { AI_DIFFICULTY = d; buildOLDifficultyRow(containerId); };
+    c.appendChild(b);
+  });
+}
 function olMaxPlayers() { return maxPlayersForSize(olSize); }
 function buildOLCreateBtns() {
   var mp = olMaxPlayers();
@@ -2075,6 +2290,7 @@ function buildOLCreateBtns() {
   if (olHumans + olAIs < 2) { if (olAIs < 1) olAIs = Math.min(1, mp - olHumans); }
   buildOLNumRow('ol-c-humans', 0, mp, olHumans, function(n) { olHumans = n; if (olHumans + olAIs > olMaxPlayers()) olAIs = olMaxPlayers() - olHumans; if (olHumans + olAIs < 2 && olAIs < 1) olAIs = 1; buildOLCreateBtns(); });
   buildOLNumRow('ol-c-ais', 0, mp - olHumans, olAIs, function(n) { olAIs = n; buildOLCreateBtns(); });
+  buildOLDifficultyRow('ol-c-difficulty');
   buildOLSizeRow('ol-c-size', olSize, function(n) { olSize = n; if (olHumans + olAIs > olMaxPlayers()) { olAIs = Math.max(0, olMaxPlayers() - olHumans); if (olHumans > olMaxPlayers()) olHumans = olMaxPlayers(); } buildOLCreateBtns(); });
 }
 
@@ -2457,10 +2673,8 @@ function olDoAI() {
     if (!empty.length) return;
     pick = empty[Math.floor(Math.random() * empty.length)];
   } else {
-    var own = [];
-    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (board[r][c].owner === turn) own.push([r, c]);
-    if (!own.length) return;
-    pick = own[Math.floor(Math.random() * own.length)];
+    pick = pickAIOwnCell(board, SIZE, turn, AI_DIFFICULTY);
+    if (!pick) return;
   }
   channel.publish('move', { r: pick[0], c: pick[1], player: turn });
 }
@@ -2659,12 +2873,17 @@ var demoMoves = 0, DEMO_MAX_MOVES = 120;
 var demoStaleMoves = 0;
 
 function demoIsBlocked(r, c) {
-  for (var dr = -1; dr <= 1; dr++) {
-    for (var dc = -1; dc <= 1; dc++) {
+  for (var dr = -2; dr <= 2; dr++) {
+    for (var dc = -2; dc <= 2; dc++) {
       if (dr === 0 && dc === 0) continue;
-      var nr = r + dr, nc = c + dc;
-      if (nr >= 0 && nr < DEMO_SIZE && nc >= 0 && nc < DEMO_SIZE) {
-        if (demoBoard[nr][nc].owner >= 0) return true;
+      var isCardinal = (dr === 0 || dc === 0);
+      var dist = Math.abs(dr) + Math.abs(dc);
+      if (isCardinal && dist <= 2) {
+        var nr = r + dr, nc = c + dc;
+        if (nr >= 0 && nr < DEMO_SIZE && nc >= 0 && nc < DEMO_SIZE && demoBoard[nr][nc].owner >= 0) return true;
+      } else if (!isCardinal && Math.abs(dr) <= 1 && Math.abs(dc) <= 1) {
+        var nr = r + dr, nc = c + dc;
+        if (nr >= 0 && nr < DEMO_SIZE && nc >= 0 && nc < DEMO_SIZE && demoBoard[nr][nc].owner >= 0) return true;
       }
     }
   }
@@ -2729,7 +2948,7 @@ function demoStep() {
       for (var c = 0; c < DEMO_SIZE; c++)
         if (demoBoard[r][c].owner === demoTurn) own.push([r, c]);
     if (own.length === 0) { demoAlive[demoTurn] = false; demoTurn = (demoTurn + 1) % DEMO_PLAYERS; demoRender(); return; }
-    var pick = own[Math.floor(Math.random() * own.length)];
+    var pick = pickAIOwnCell(demoBoard, DEMO_SIZE, demoTurn, 'human');
     demoBoard[pick[0]][pick[1]].dots++;
   }
 
@@ -2935,6 +3154,61 @@ function showBlockedNotice(info) {
   document.body.appendChild(bar);
 }
 checkBlockStatus();
+
+// ======== LIVE USERNAME SYNC (picks up admin-side renames/resets) ========
+// Admin panel writes straight to users/{id}/username. Without this, a player's
+// own tab, and any room they're in, would keep showing their old name until they
+// happened to reload. This listens for that field changing out from under us and
+// reacts immediately — including catching up if the change happened while offline.
+function watchUsernameChanges() {
+  if (!db || !myUserId) return;
+  db.ref('users/' + myUserId + '/username').on('value', function(snap) {
+    var remoteName = snap.val() || '';
+    if (remoteName === (myUsername || '')) return; // matches what we already have — no-op
+    if (!remoteName) {
+      handleForcedUsernameReset();
+    } else {
+      applyRemoteUsernameChange(remoteName);
+    }
+  });
+}
+
+function handleForcedUsernameReset() {
+  localStorage.setItem('cr-prev-username', myUsername);
+  myUsername = '';
+  localStorage.removeItem('cr-username');
+  promptUsername();
+  updateChatUsernameNotice();
+  if (gameMode === 'online' && mySlot >= 0) {
+    myName = '';
+    playerNames[mySlot] = '';
+    if (channel) channel.presence.update({ name: myName, host: isHost, spectator: isSpectator });
+    renderPlayerBar();
+    renderSideLB();
+  }
+  var bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+    'background:#3a2a14;color:#f2ece2;padding:10px 16px;font:600 13px -apple-system,BlinkMacSystemFont,sans-serif;' +
+    'text-align:center;border-bottom:1px solid #6b4b2b;';
+  bar.textContent = 'Your username was reset by an admin. Please choose a new one.';
+  document.body.appendChild(bar);
+}
+
+function applyRemoteUsernameChange(newName) {
+  localStorage.setItem('cr-prev-username', myUsername);
+  myUsername = newName;
+  localStorage.setItem('cr-username', myUsername);
+  showUsername(myUsername);
+  updateChatUsernameNotice();
+  if (gameMode === 'online' && mySlot >= 0) {
+    myName = myUsername;
+    playerNames[mySlot] = myUsername;
+    if (channel) channel.presence.update({ name: myName, host: isHost, spectator: isSpectator });
+    renderPlayerBar();
+    renderSideLB();
+  }
+}
+watchUsernameChanges();
 
 function initUsername() {
   if (myUsername) {
@@ -3702,7 +3976,31 @@ window.addEventListener('DOMContentLoaded', function() {
   try { initChat(); } catch(e) {}
   try { loadMainPublicRooms(); } catch(e) {}
   try { demoInit(); } catch(e) {}
+  try { loadAnnouncements(); } catch(e) {}
 });
+
+// ======== ANNOUNCEMENTS ========
+// Single text node at announcements/text, edited from the admin panel. Rendered
+// with textContent (never innerHTML) so admin-entered text can't inject markup,
+// and white-space:pre-wrap on .announce-body preserves newlines from that text.
+function loadAnnouncements() {
+  if (!db) return;
+  db.ref('announcements/text').on('value', function(snap) {
+    var body = document.getElementById('announce-body');
+    if (!body) return;
+    var text = snap.val();
+    if (!text || !String(text).trim()) {
+      body.textContent = 'No announcements right now.';
+      body.style.opacity = '0.55';
+      body.style.fontStyle = 'italic';
+    } else {
+      body.textContent = text;
+      body.style.opacity = '1';
+      body.style.fontStyle = 'normal';
+    }
+  });
+}
+
 var mainPubSubbed = false;
 function loadMainPublicRooms() {
   var list = document.getElementById('main-pub-list');
@@ -3791,6 +4089,7 @@ function loadMainPublicRooms() {
     <div id="ol-create-nouser" style="font-size:12px;color:#e87ea8;margin-bottom:0.5rem;display:none;">Set a username first (top right)</div>
     <div class="ol-row"><span class="ol-label">Human slots:</span><div id="ol-c-humans"></div></div>
     <div class="ol-row"><span class="ol-label">AIs:</span><div id="ol-c-ais"></div></div>
+    <div class="ol-row"><span class="ol-label">AI difficulty:</span><div id="ol-c-difficulty"></div></div>
     <div class="ol-row"><span class="ol-label">Grid:</span><div id="ol-c-size"></div></div>
     <div class="ol-row"><span class="ol-label">Visibility:</span>
       <button class="sbtn active" id="vis-public" onclick="olVisibility='public';document.getElementById('vis-public').className='sbtn active';document.getElementById('vis-private').className='sbtn';">Public</button>
@@ -3902,6 +4201,14 @@ function loadMainPublicRooms() {
       <input type="text" id="chat-input" placeholder="Type a message…" maxlength="200" onkeydown="if(event.key==='Enter')sendChat();">
       <button onclick="sendChat()">Send</button>
     </div>
+  </div>
+</div>
+
+<!-- ANNOUNCEMENTS -->
+<div class="announce-section" id="announce-section">
+  <div class="announce-card">
+    <div class="announce-title">📢 Announcements</div>
+    <div class="announce-body" id="announce-body">Loading…</div>
   </div>
 </div>
 
