@@ -476,7 +476,7 @@
 <div class="online-info" id="online-info" style="display:none;"></div>
 
 <div class="row sort-btn">
-  <button class="btn" id="sort-btn" onclick="toggleSort()">Sort by squares</button>
+  <button class="btn" id="sort-btn" onclick="toggleSort()">Sort by dots</button>
   <button class="btn" id="forfeit-btn" onclick="forfeit()" style="margin-left:4px;background:rgba(239,123,123,0.3);">Forfeit</button>
 </div>
 <div class="player-bar" id="player-bar"></div>
@@ -658,8 +658,8 @@ function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i
 var SIZE = 5, NUM_HUMANS = 1, NUM_AIS = 1, NUM_PLAYERS = 2;
 var SIZES = [5, 8, 10, 12, 15, 20, 25, 30];
 var AI_DIFFICULTY = 'random';
-var AI_DIFFICULTIES = ['dumbass', 'random', 'subhuman', 'human'];
-var AI_DIFFICULTY_LABELS = { dumbass: 'Dumbass', random: 'Random', subhuman: 'Subhuman', human: 'Human' };
+var AI_DIFFICULTIES = ['subhuman', 'dumbass', 'random', 'human', 'smart'];
+var AI_DIFFICULTY_LABELS = { subhuman: 'Subhuman', dumbass: 'Dumbass', random: 'Random', human: 'Human', smart: 'Smart' };
 
 function buildDifficultyButtons() {
   var c = document.getElementById('difficulty-btns');
@@ -789,25 +789,41 @@ function pickAIOwnCell(b, size, turn, difficulty) {
       if (b[r][c].owner === turn) own.push([r, c]);
   if (own.length === 0) return null;
 
+  if (difficulty === 'subhuman') {
+    // Avoids clicking a 3 next to opponent's 3 AND avoids creating a 3 next to opponent's 3
+    var safe = own.filter(function(p) {
+      var dots = b[p[0]][p[1]].dots;
+      var adjOpp3 = aiAdjacentToOpponentThree(b, size, p[0], p[1], turn);
+      if (dots === 3 && adjOpp3) return false;
+      if (dots === 2 && adjOpp3) return false;
+      return true;
+    });
+    var pool = safe.length ? safe : own;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
   if (difficulty === 'dumbass') {
     // Always tries to upgrade a 2 to a 3 if it's next to an opponent's 3 (walks into danger).
     var twoAdj = own.filter(function(p) { return b[p[0]][p[1]].dots === 2 && aiAdjacentToOpponentThree(b, size, p[0], p[1], turn); });
     if (twoAdj.length) return twoAdj[Math.floor(Math.random() * twoAdj.length)];
-    // Never clicks a 3 next to an opponent's 3 if it can help it (avoids the good capture).
+    // Never clicks a 3 next to an opponent's 3 if it can help it.
     var safe = own.filter(function(p) { return !(b[p[0]][p[1]].dots === 3 && aiAdjacentToOpponentThree(b, size, p[0], p[1], turn)); });
     var pool = safe.length ? safe : own;
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
-  if (difficulty === 'subhuman') {
-    // Only priority: always clicks a 3 next to an opponent's 3 — picks whichever starts the longest chain.
+  if (difficulty === 'human') {
+    // Priority 1: always clicks a 3 next to an opponent's 3 — picks whichever starts the longest chain.
     var capture = aiPickCapture(own, b, size, turn);
     if (capture) return capture;
-    // Otherwise, plain random.
-    return own[Math.floor(Math.random() * own.length)];
+    // Otherwise, random — but avoid creating a 3 next to an opponent's 3 (i.e.
+    // upgrading a 2 into danger) when there's any other option.
+    var safe = own.filter(function(p) { return !(b[p[0]][p[1]].dots === 2 && aiAdjacentToOpponentThree(b, size, p[0], p[1], turn)); });
+    var pool = safe.length ? safe : own;
+    return pool[Math.floor(Math.random() * pool.length)];
   }
 
-  if (difficulty === 'human') {
+  if (difficulty === 'smart') {
     // 3dot-3dot capture takes top priority.
     var capture = aiPickCapture(own, b, size, turn);
     if (capture) return capture;
@@ -843,7 +859,7 @@ function pickAIOwnCell(b, size, turn, difficulty) {
 
 function maxPlayersForSize(n) {
   var c = Math.ceil(n / 3);
-  return Math.min(c * c, 64);
+  return c * c;
 }
 var board, turn, animating;
 var placed, alive, wins;
@@ -967,6 +983,25 @@ function getDotCounts() {
     for (var c = 0; c < SIZE; c++)
       if (board[r][c].owner >= 0 && board[r][c].owner < NUM_PLAYERS) counts[board[r][c].owner] += board[r][c].dots;
   return counts;
+}
+
+// Callers that need both square and dot counts together (every render/move)
+// used to run two full board scans back to back via getCounts()+getDotCounts().
+// This does it in one pass. getCounts()/getDotCounts() stay as-is for the
+// handful of callers that only need one or the other.
+function getPlayerCounts() {
+  var counts = [], dotCounts = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) { counts.push(0); dotCounts.push(0); }
+  for (var r = 0; r < SIZE; r++) {
+    for (var c = 0; c < SIZE; c++) {
+      var owner = board[r][c].owner;
+      if (owner >= 0 && owner < NUM_PLAYERS) {
+        counts[owner]++;
+        dotCounts[owner] += board[r][c].dots;
+      }
+    }
+  }
+  return { counts: counts, dotCounts: dotCounts };
 }
 
 var skipColourPicker = false;
@@ -1275,11 +1310,11 @@ function renderGrid() {
   updateAllCells();
 }
 
-var sortBySquares = false;
+var sortByDots = false;
 
 function toggleSort() {
-  sortBySquares = !sortBySquares;
-  document.getElementById('sort-btn').className = 'btn' + (sortBySquares ? ' active' : '');
+  sortByDots = !sortByDots;
+  document.getElementById('sort-btn').className = 'btn' + (sortByDots ? ' active' : '');
   renderPlayerBar();
   updateUI();
 }
@@ -1287,12 +1322,13 @@ function toggleSort() {
 function renderPlayerBar() {
   var bar = document.getElementById('player-bar');
   bar.innerHTML = '';
-  var counts = getCounts();
-  var dotCounts = getDotCounts();
+  var pc = getPlayerCounts();
+  var counts = pc.counts;
+  var dotCounts = pc.dotCounts;
   var order = [];
-  if (sortBySquares) {
+  if (sortByDots) {
     for (var i = 0; i < NUM_PLAYERS; i++) order.push(i);
-    order.sort(function(a, b) { return counts[b] - counts[a]; });
+    order.sort(function(a, b) { return dotCounts[b] - dotCounts[a]; });
   } else if (randomizeEnabled && currentRoundOrder.length > 0) {
     // Show in current round's turn order, then dead players at the end
     var inOrder = {};
@@ -1348,7 +1384,7 @@ function renderPlayerBar() {
     var cnt = document.createElement('div');
     cnt.className = 'count';
     cnt.id = 'cnt-' + i;
-    cnt.textContent = counts[i] + ' ■  ' + dotCounts[i] + ' ●';
+    cnt.textContent = dotCounts[i] + ' ●  ' + counts[i] + ' ■';
     cnt.style.fontSize = '11px';
     tag.appendChild(cnt);
 
@@ -1357,16 +1393,17 @@ function renderPlayerBar() {
 }
 
 function updateCounts() {
-  var counts = getCounts();
-  var dotCounts = getDotCounts();
-  if (sortBySquares) {
+  if (sortByDots) {
     // Re-render but with classes applied immediately
     renderPlayerBar();
     return;
   }
+  var pc = getPlayerCounts();
+  var counts = pc.counts;
+  var dotCounts = pc.dotCounts;
   for (var i = 0; i < NUM_PLAYERS; i++) {
     var el = document.getElementById('cnt-' + i);
-    if (el) el.textContent = counts[i] + ' ■  ' + dotCounts[i] + ' ●';
+    if (el) el.textContent = dotCounts[i] + ' ●  ' + counts[i] + ' ■';
   }
 }
 
@@ -1831,6 +1868,13 @@ function showPlayground() {
   lbl.style.cssText = 'text-align:center;font-size:12px;font-weight:600;opacity:0.7;color:#fff;margin-bottom:0.5rem;';
   pg.appendChild(lbl);
 
+  // Dot counter
+  var counterEl = document.createElement('div');
+  counterEl.id = 'pg-dot-count';
+  counterEl.style.cssText = 'text-align:center;font-size:13px;font-weight:700;color:#fff;margin-bottom:0.6rem;opacity:0.9;';
+  counterEl.textContent = '0 dots';
+  pg.appendChild(counterEl);
+
   // Init board
   pgBoard = [];
   for (var r = 0; r < pgSize; r++) {
@@ -1868,6 +1912,9 @@ function showPlayground() {
   pg.appendChild(gridEl);
   pgCellSize = cs;
   pgDotSize = ds;
+  // Reuse the main game's shared dot-size CSS variable instead of tracking a
+  // separate size scheme — this is what lets pgUpdateCell reuse buildDots().
+  document.documentElement.style.setProperty('--dot-size', ds + 'px');
 }
 
 function pgClick(r, c) {
@@ -1879,6 +1926,7 @@ function pgClick(r, c) {
     cell.dots++;
   }
   pgUpdateCell(r, c);
+  pgUpdateDotCount();
   pgProcessExplosions();
 }
 
@@ -1895,26 +1943,22 @@ function pgUpdateCell(r, c) {
     el.title = dots + ' dot' + (dots > 1 ? 's' : '');
   }
   el.innerHTML = '';
+  // Reuses the same buildDots() layout helper the main game grid uses — dots
+  // here render white via .dot's CSS default, which already matches
+  // COLORS[0].dotCol, so no per-dot recoloring is needed like updateCell does.
   if (dots > 0) {
-    var ds = pgDotSize;
-    var dotColor = COLORS[0].dotCol;
-    var container = document.createElement('div');
-    container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:1px;pointer-events:none;';
-    function mkDot() {
-      var d = document.createElement('div');
-      d.style.cssText = 'width:' + ds + 'px;height:' + ds + 'px;border-radius:50%;background:' + dotColor + ';box-shadow:0 1px 3px rgba(0,0,0,0.15);';
-      return d;
-    }
-    function mkRow() { var r = document.createElement('div'); r.style.cssText = 'display:flex;gap:2px;justify-content:center;'; return r; }
-    if (dots === 1) { var row = mkRow(); row.appendChild(mkDot()); container.appendChild(row); }
-    else if (dots === 2) { var row = mkRow(); row.appendChild(mkDot()); row.appendChild(mkDot()); container.appendChild(row); }
-    else if (dots === 3) { var t = mkRow(); t.appendChild(mkDot()); container.appendChild(t); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
-    else if (dots === 4) { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
-    else if (dots === 5) { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var m = mkRow(); m.appendChild(mkDot()); container.appendChild(m); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
-    else if (dots === 6) { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var m = mkRow(); m.appendChild(mkDot()); m.appendChild(mkDot()); container.appendChild(m); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
-    else if (dots === 7) { var t = mkRow(); t.appendChild(mkDot()); t.appendChild(mkDot()); t.appendChild(mkDot()); container.appendChild(t); var m = mkRow(); m.appendChild(mkDot()); container.appendChild(m); var b = mkRow(); b.appendChild(mkDot()); b.appendChild(mkDot()); b.appendChild(mkDot()); container.appendChild(b); }
-    el.appendChild(container);
+    el.appendChild(buildDots(dots));
   }
+}
+
+function pgUpdateDotCount() {
+  var el = document.getElementById('pg-dot-count');
+  if (!el) return;
+  var total = 0;
+  for (var r = 0; r < pgSize; r++)
+    for (var c = 0; c < pgSize; c++)
+      total += pgBoard[r][c].dots;
+  el.textContent = total + (total === 1 ? ' dot' : ' dots');
 }
 
 function pgUpdateAll() {
@@ -1952,6 +1996,7 @@ function pgProcessExplosions() {
 
   // Render updated board
   pgUpdateAll();
+  pgUpdateDotCount();
 
   // Animate flying dots
   var grid = document.getElementById('pg-grid');
@@ -1982,9 +2027,13 @@ function pgFlyDot(grid, fr, fc, tr, tc) {
   var fromY = fR.top + fR.height / 2 - gR.top;
   var toX = tR.left + tR.width / 2 - gR.left;
   var toY = tR.top + tR.height / 2 - gR.top;
-  var ds = pgDotSize;
+  // Reuses the same .flying-dot CSS class + --dot-size variable the main game's
+  // animateExplosion() uses, instead of duplicating the same inline style block.
   var dot = document.createElement('div');
-  dot.style.cssText = 'position:absolute;width:' + ds + 'px;height:' + ds + 'px;border-radius:50%;background:' + COLORS[0].dotCol + ';box-shadow:0 1px 3px rgba(0,0,0,0.15);z-index:20;pointer-events:none;transition:transform 0.28s cubic-bezier(0.22,0.61,0.36,1);left:' + (fromX - ds/2) + 'px;top:' + (fromY - ds/2) + 'px;';
+  dot.className = 'flying-dot';
+  var hs = pgDotSize / 2;
+  dot.style.left = (fromX - hs) + 'px';
+  dot.style.top = (fromY - hs) + 'px';
   grid.style.position = 'relative';
   grid.appendChild(dot);
   requestAnimationFrame(function() { requestAnimationFrame(function() {
@@ -2169,6 +2218,14 @@ function hideOLPanels() {
 // ---- PUBLIC ROOM LOBBY ----
 function ensureAbly(cb) {
   if (amBlocked) { console.warn('Blocked from online play.'); return; }
+  if (!blockStatusChecked) {
+    // The block check is an async DB read — on a fast page load it may not
+    // have resolved yet. Wait for it rather than trusting amBlocked's current
+    // (possibly not-yet-updated) value, so a blocked device can't slip an
+    // online connection in during that gap.
+    (blockStatusPromise || Promise.resolve()).then(function() { ensureAbly(cb); });
+    return;
+  }
   if (typeof Ably === 'undefined') { console.warn('Ably not available'); return; }
   if (ably && (ably.connection.state === 'connected' || ably.connection.state === 'connecting')) {
     if (ably.connection.state === 'connected') { cb(); }
@@ -2948,7 +3005,7 @@ function demoStep() {
       for (var c = 0; c < DEMO_SIZE; c++)
         if (demoBoard[r][c].owner === demoTurn) own.push([r, c]);
     if (own.length === 0) { demoAlive[demoTurn] = false; demoTurn = (demoTurn + 1) % DEMO_PLAYERS; demoRender(); return; }
-    var pick = pickAIOwnCell(demoBoard, DEMO_SIZE, demoTurn, 'human');
+    var pick = pickAIOwnCell(demoBoard, DEMO_SIZE, demoTurn, 'smart');
     demoBoard[pick[0]][pick[1]].dots++;
   }
 
@@ -3135,23 +3192,31 @@ var USERNAME_COOLDOWN = 30000; // 30 seconds between changes
 
 // ======== BLOCK LIST (admin can block a device's 10-digit code) ========
 var amBlocked = false;
+var blockStatusChecked = false;
+var blockStatusPromise = null;
 function checkBlockStatus() {
-  if (!db) return;
-  db.ref('banned/' + mySecretCode).once('value', function(snap) {
+  if (!db) { blockStatusChecked = true; return Promise.resolve(); }
+  blockStatusPromise = db.ref('banned/' + mySecretCode).once('value').then(function(snap) {
     if (snap.exists()) {
       amBlocked = true;
       showBlockedNotice(snap.val());
     }
+    blockStatusChecked = true;
+  }).catch(function() {
+    blockStatusChecked = true;
   });
+  return blockStatusPromise;
 }
 function showBlockedNotice(info) {
   var reason = (info && info.reason) ? info.reason : '';
   var bar = document.createElement('div');
-  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+  // Sits in normal document flow at the very top of the page (not fixed), so it's
+  // only visible when scrolled all the way up and never overlaps the game UI.
+  bar.style.cssText = 'position:static;width:100%;box-sizing:border-box;z-index:1;' +
     'background:#3a1414;color:#f2ece2;padding:10px 16px;font:600 13px -apple-system,BlinkMacSystemFont,sans-serif;' +
     'text-align:center;border-bottom:1px solid #6b2b2b;';
   bar.textContent = 'This device is blocked from online play and chat' + (reason ? (': ' + reason) : '.') + ' Local play against AI still works.';
-  document.body.appendChild(bar);
+  document.body.insertBefore(bar, document.body.firstChild);
 }
 checkBlockStatus();
 
@@ -3187,11 +3252,11 @@ function handleForcedUsernameReset() {
     renderSideLB();
   }
   var bar = document.createElement('div');
-  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+  bar.style.cssText = 'position:static;width:100%;box-sizing:border-box;z-index:1;' +
     'background:#3a2a14;color:#f2ece2;padding:10px 16px;font:600 13px -apple-system,BlinkMacSystemFont,sans-serif;' +
     'text-align:center;border-bottom:1px solid #6b4b2b;';
   bar.textContent = 'Your username was reset by an admin. Please choose a new one.';
-  document.body.appendChild(bar);
+  document.body.insertBefore(bar, document.body.firstChild);
 }
 
 function applyRemoteUsernameChange(newName) {
@@ -3277,14 +3342,26 @@ function setUsername() {
           showUsername(myUsername);
           updateChatUsernameNotice();
           loadChat();
+          // Re-sync this account's stored secret/fingerprint/lastSeen to THIS
+          // device's live values. Without this, an adopted account keeps
+          // whatever secret code it had from wherever it was first created —
+          // which drifts from the browser's current cr-secret the moment
+          // storage was ever cleared (the very thing that triggers this
+          // adoption path) — and any block against the old code then silently
+          // stops matching forever.
+          registerUsername(myUsername);
           alert('Welcome back! Your account "' + myUsername + '" was restored.');
           return;
         }
         // No username on existing account, proceed normally
         doSetUsername(name);
-      });
+      }, function() { doSetUsername(name); });
       return;
     }
+    doSetUsername(name);
+  }, function() {
+    // Couldn't read /fingerprints (e.g. permission denied) — don't let that block
+    // setting a username, just proceed as if this is a fresh device.
     doSetUsername(name);
   });
 }
@@ -3308,8 +3385,12 @@ function doSetUsername(name) {
     updates['users/' + myUserId + '/secret'] = mySecretCode;
     updates['users/' + myUserId + '/lastSeen'] = firebase.database.ServerValue.TIMESTAMP;
     updates['users/' + myUserId + '/fingerprint'] = browserFingerprint;
-    updates['fingerprints/' + browserFingerprint] = { userId: myUserId, lastSeen: firebase.database.ServerValue.TIMESTAMP };
+    // fingerprints/{fp} is written separately below, NOT bundled into this atomic
+    // update — a multi-path update() fails in its entirety if any single path is
+    // denied by security rules, so a rules gap on /fingerprints must not be able
+    // to take the actual username change down with it.
     db.ref().update(updates).then(function() {
+      db.ref('fingerprints/' + browserFingerprint).set({ userId: myUserId, lastSeen: firebase.database.ServerValue.TIMESTAMP }).catch(function() {});
       localStorage.setItem('cr-prev-username', myUsername);
       myUsername = name;
       localStorage.setItem('cr-username', myUsername);
@@ -3399,8 +3480,10 @@ function registerUsername(name) {
   updates['users/' + myUserId + '/secret'] = mySecretCode;
   updates['users/' + myUserId + '/fingerprint'] = browserFingerprint;
   updates['users/' + myUserId + '/lastSeen'] = firebase.database.ServerValue.TIMESTAMP;
-  updates['fingerprints/' + browserFingerprint] = { userId: myUserId, lastSeen: firebase.database.ServerValue.TIMESTAMP };
   db.ref().update(updates);
+  // Kept separate for the same reason as in doSetUsername — must not be able to
+  // block the update above if /fingerprints rules are missing or misconfigured.
+  db.ref('fingerprints/' + browserFingerprint).set({ userId: myUserId, lastSeen: firebase.database.ServerValue.TIMESTAMP }).catch(function() {});
 }
 
 // ======== CHAT SYSTEM ========
@@ -3983,6 +4066,44 @@ window.addEventListener('DOMContentLoaded', function() {
 // Single text node at announcements/text, edited from the admin panel. Rendered
 // with textContent (never innerHTML) so admin-entered text can't inject markup,
 // and white-space:pre-wrap on .announce-body preserves newlines from that text.
+// ======== ANNOUNCEMENTS ========
+// Single text node at announcements/text, edited from the admin panel using a
+// small custom markup — **bold**, *italic*, [size=sm]...[/size], [size=lg]...[/size]
+// — rather than real HTML. The DB is world-writable with no auth, so rendering
+// raw HTML here (via innerHTML) would let anyone with write access to that node
+// inject a script into every player's session. This parser only recognizes these
+// four tokens and builds DOM nodes directly with textContent; anything else —
+// including literal HTML someone types — is inserted as inert plain text.
+function renderAnnouncementMarkup(container, raw) {
+  container.innerHTML = '';
+  if (!raw) return;
+  var re = /\*\*([^*]+)\*\*|\*([^*]+)\*|\[size=(sm|lg)\]([\s\S]*?)\[\/size\]/g;
+  var lastIndex = 0, m;
+  while ((m = re.exec(raw)) !== null) {
+    if (m.index > lastIndex) {
+      container.appendChild(document.createTextNode(raw.slice(lastIndex, m.index)));
+    }
+    if (m[1] !== undefined) {
+      var b = document.createElement('strong');
+      b.textContent = m[1];
+      container.appendChild(b);
+    } else if (m[2] !== undefined) {
+      var i = document.createElement('em');
+      i.textContent = m[2];
+      container.appendChild(i);
+    } else if (m[3] !== undefined) {
+      var s = document.createElement('span');
+      s.style.fontSize = m[3] === 'sm' ? '0.85em' : '1.35em';
+      s.textContent = m[4];
+      container.appendChild(s);
+    }
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < raw.length) {
+    container.appendChild(document.createTextNode(raw.slice(lastIndex)));
+  }
+}
+
 function loadAnnouncements() {
   if (!db) return;
   db.ref('announcements/text').on('value', function(snap) {
@@ -3994,12 +4115,13 @@ function loadAnnouncements() {
       body.style.opacity = '0.55';
       body.style.fontStyle = 'italic';
     } else {
-      body.textContent = text;
       body.style.opacity = '1';
       body.style.fontStyle = 'normal';
+      renderAnnouncementMarkup(body, text);
     }
   });
 }
+
 
 var mainPubSubbed = false;
 function loadMainPublicRooms() {
