@@ -23,7 +23,7 @@
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg); color: var(--text);
-    display: flex; flex-direction: column; align-items: center;
+    display: flex; flex-direction: column; align-items: stretch;
     padding: 1rem 5rem; user-select: none;
   }
 
@@ -62,11 +62,19 @@
 
   .turn-label { font-size: 11px; font-weight: 600; opacity: 0.8; text-align: center; margin-bottom: 0.4rem; }
 
-  .grid-wrap { position: relative; }
+  /* grid-wrap is the horizontal-scroll container for the board. It's a flex box so the
+     grid can be centered when it fits — but `safe center` means that if the grid is ever
+     wider than grid-wrap, it falls back to flex-start instead of centering, which is what
+     stops the left edge from being pushed off-screen and unreachable by scrolling. */
+  .grid-wrap {
+    position: relative; min-width: 0; max-width: 100%;
+    display: flex; justify-content: safe center; justify-content: -webkit-safe center;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
 
   .game-layout {
-    display: flex; gap: 1rem; align-items: flex-start; justify-content: center;
-    width: 100%;
+    display: flex; gap: 1rem; align-items: flex-start; justify-content: safe center; justify-content: -webkit-safe center;
+    width: 100%; min-width: 0;
   }
 
   .side-lb {
@@ -92,8 +100,9 @@
   .side-lb-row.lb-alive { opacity: 0.4; }
 
   @media (max-width: 700px) {
-    .game-layout { flex-direction: column; align-items: center; }
+    .game-layout { flex-direction: column; align-items: stretch; }
     .side-lb { max-width: 100%; min-width: unset; width: 100%; order: -1; }
+    .grid-wrap { width: 100%; }
   }
   .grid {
     display: grid; gap: var(--gap); width: fit-content;
@@ -546,6 +555,7 @@
 
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script>
 // Firebase fallback check
 if (typeof firebase === 'undefined') {
@@ -634,6 +644,43 @@ var COLORS = [
   { name:'Storm',     dot:'#708090', shadow:'#506070', dotCol:'#fff' },
   { name:'Charcoal',  dot:'#505050', shadow:'#333',    dotCol:'#fff' },
   { name:'Black',     dot:'#2a2a2a', shadow:'#111',    dotCol:'#fff' },
+  // Extended palette (65-100)
+  { name:'Scarlet',   dot:'#d03030', shadow:'#a82020', dotCol:'#fff' },
+  { name:'Tomato',    dot:'#e86040', shadow:'#c04028', dotCol:'#fff' },
+  { name:'Pumpkin',   dot:'#d87828', shadow:'#b86018', dotCol:'#fff' },
+  { name:'Marigold',  dot:'#d8a818', shadow:'#b88810', dotCol:'#fff' },
+  { name:'Canary',    dot:'#e0d040', shadow:'#b8a828', dotCol:'#333' },
+  { name:'Chartreuse',dot:'#88d830', shadow:'#60b018', dotCol:'#fff' },
+  { name:'Spring',    dot:'#40d868', shadow:'#28b048', dotCol:'#fff' },
+  { name:'Seafoam',   dot:'#50d8a0', shadow:'#30b880', dotCol:'#fff' },
+  { name:'Lagoon',    dot:'#38c8c0', shadow:'#20a8a0', dotCol:'#fff' },
+  { name:'Azure',     dot:'#38a0e0', shadow:'#2080c0', dotCol:'#fff' },
+  { name:'Sapphire',  dot:'#3060c0', shadow:'#2048a0', dotCol:'#fff' },
+  { name:'Royal',     dot:'#5040c0', shadow:'#3828a0', dotCol:'#fff' },
+  { name:'Grape',     dot:'#7838b8', shadow:'#582898', dotCol:'#fff' },
+  { name:'Fuchsia',   dot:'#c030a0', shadow:'#a02080', dotCol:'#fff' },
+  { name:'Cerise',    dot:'#d83868', shadow:'#b82848', dotCol:'#fff' },
+  { name:'Blush',     dot:'#e8a0b0', shadow:'#c88090', dotCol:'#fff' },
+  { name:'Sand',      dot:'#d8c098', shadow:'#b8a078', dotCol:'#333' },
+  { name:'Khaki',     dot:'#b8b070', shadow:'#989050', dotCol:'#fff' },
+  { name:'Ash',       dot:'#989898', shadow:'#787878', dotCol:'#fff' },
+  { name:'Silver',    dot:'#c0c0c0', shadow:'#a0a0a0', dotCol:'#333' },
+  { name:'Maroon',    dot:'#700020', shadow:'#500010', dotCol:'#fff' },
+  { name:'Chocolate', dot:'#784028', shadow:'#582818', dotCol:'#fff' },
+  { name:'Sienna',    dot:'#a05028', shadow:'#803818', dotCol:'#fff' },
+  { name:'Caramel',   dot:'#c09040', shadow:'#a07028', dotCol:'#fff' },
+  { name:'Blonde',    dot:'#d8c870', shadow:'#b8a850', dotCol:'#333' },
+  { name:'Pistachio', dot:'#90c870', shadow:'#70a850', dotCol:'#fff' },
+  { name:'Clover',    dot:'#408838', shadow:'#286828', dotCol:'#fff' },
+  { name:'Seaweed',   dot:'#306858', shadow:'#204838', dotCol:'#fff' },
+  { name:'Petrol',    dot:'#206878', shadow:'#104858', dotCol:'#fff' },
+  { name:'Cornflower',dot:'#6888e0', shadow:'#4868c0', dotCol:'#fff' },
+  { name:'Iris',      dot:'#7868d0', shadow:'#5848b0', dotCol:'#fff' },
+  { name:'Thistle',   dot:'#b888d0', shadow:'#9868b0', dotCol:'#fff' },
+  { name:'Bubblegum', dot:'#e870a8', shadow:'#c85088', dotCol:'#fff' },
+  { name:'Coral Red', dot:'#e05048', shadow:'#c03830', dotCol:'#fff' },
+  { name:'Ivory',     dot:'#e8e0d0', shadow:'#c8c0b0', dotCol:'#333' },
+  { name:'Graphite',  dot:'#404040', shadow:'#282828', dotCol:'#fff' },
 ];
 
 var colorMap = []; // colorMap[playerIndex] = COLORS index
@@ -1269,6 +1316,19 @@ function renderSideLB() {
   }
 }
 
+// The big horizontal body padding is a desktop-only layout choice (see CSS `body { padding: 1rem 5rem }`).
+// On narrow screens the CSS media query already shrinks it to 0.6rem 0.3rem — this just needs to not
+// be clobbered by an inline style, which is what used to cut the board off on phones.
+function updateBodyPadding() {
+  if (window.innerWidth <= 600) {
+    document.body.style.paddingLeft = '';
+    document.body.style.paddingRight = '';
+  } else {
+    document.body.style.paddingLeft = SIZE >= 30 ? '0' : '5rem';
+    document.body.style.paddingRight = '';
+  }
+}
+
 function applyCellSize() {
   var cs, ds, g;
   if (SIZE <= 3) { cs = 70; ds = 18; g = 5; }
@@ -1280,17 +1340,23 @@ function applyCellSize() {
   else if (SIZE <= 20) { cs = 34; ds = 10; g = 5; }
   else if (SIZE <= 25) { cs = 30; ds = 9; g = 4; }
   else { cs = 28; ds = 8; g = 4; }
+
   document.documentElement.style.setProperty('--cell', cs + 'px');
   document.documentElement.style.setProperty('--dot-size', ds + 'px');
   document.documentElement.style.setProperty('--gap', g + 'px');
-  document.body.style.paddingLeft = SIZE >= 30 ? '0' : '5rem';
-  // Allow horizontal scroll for large grids on mobile
-  var gw = $('grid-wrap');
-  if (gw) {
-    if (SIZE >= 20) { gw.style.overflowX = 'auto'; gw.style.maxWidth = '100vw'; gw.style.webkitOverflowScrolling = 'touch'; }
-    else { gw.style.overflowX = ''; gw.style.maxWidth = ''; }
-  }
+  updateBodyPadding();
+  // Scrolling/centering for boards wider than the screen is handled by CSS on .grid-wrap
+  // (overflow-x: auto + justify-content: safe center) — no inline style needed here.
 }
+
+(function() {
+  var resizeTimer = null;
+  window.addEventListener('resize', function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(applyCellSize, 120);
+  });
+  window.addEventListener('orientationchange', function() { setTimeout(applyCellSize, 200); });
+})();
 
 function renderGrid() {
   var grid = document.getElementById('grid');
@@ -2088,7 +2154,7 @@ function goMainMenu() {
   pgAnimating = false;
   gameGeneration++;
   pgGeneration++;
-  document.body.style.paddingLeft = '5rem';
+  updateBodyPadding();
   try { loadMainPublicRooms(); } catch(e) {}
 }
 
@@ -2132,14 +2198,34 @@ function playAgain() {
           slotMap.push({ clientId: humans[i].clientId, name: humans[i].data.name || 'Player', slot: i });
         }
         var totalPlayers = slotMap.length + olAIs;
-        // Build a fresh colorMap — humans keep spread colors, AIs get random
+        // Preserve existing colorMap for returning players, assign new colors only for new players/AIs
         var newColorMap = [];
         var usedColors = {};
-        for (var i = 0; i < totalPlayers; i++) {
-          var ci = (i * 7) % COLORS.length;
-          while (usedColors[ci]) ci = (ci + 1) % COLORS.length;
-          newColorMap.push(ci);
-          usedColors[ci] = true;
+        // First, map existing human slots to their current colors
+        for (var i = 0; i < slotMap.length; i++) {
+          // Find this player's old slot and color
+          var oldSlot = -1;
+          for (var j = 0; j < olSlotMapStored.length; j++) {
+            if (olSlotMapStored[j].clientId === slotMap[i].clientId) { oldSlot = olSlotMapStored[j].slot; break; }
+          }
+          if (oldSlot >= 0 && colorMap[oldSlot] !== undefined) {
+            newColorMap.push(colorMap[oldSlot]);
+            usedColors[colorMap[oldSlot]] = true;
+          } else {
+            newColorMap.push(-1); // placeholder, assign later
+          }
+        }
+        // Assign colors for AIs and any unassigned humans
+        for (var i = 0; i < olAIs; i++) {
+          newColorMap.push(-1);
+        }
+        for (var i = 0; i < newColorMap.length; i++) {
+          if (newColorMap[i] === -1) {
+            var ci = (i * 7) % COLORS.length;
+            while (usedColors[ci]) ci = (ci + 1) % COLORS.length;
+            newColorMap[i] = ci;
+            usedColors[ci] = true;
+          }
         }
         channel.publish('newgame', { slotMap: slotMap, numPlayers: totalPlayers, numAIs: olAIs, size: SIZE, randomizeEnabled: randomizeEnabled, colorMap: newColorMap });
       });
@@ -3167,6 +3253,8 @@ if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
     appId: "1:1013659619628:web:3100ed4eda5164e5159c89"
   });
   db = firebase.database();
+  // Sign in anonymously so database rules can verify auth
+  firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
 }
 
 // ======== USERNAME SYSTEM ========
