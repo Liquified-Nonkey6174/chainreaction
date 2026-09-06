@@ -2063,7 +2063,8 @@ function aiMove() {
   doMove(pick[0], pick[1]);
 }
 
-function processExplosions(done) {
+function processExplosions(done, _depth) {
+  _depth = (_depth || 0) + 1;
   var toExplode = [];
   for (var r = 0; r < SIZE; r++)
     for (var c = 0; c < SIZE; c++)
@@ -2093,8 +2094,36 @@ function processExplosions(done) {
   setTimeout(function() {
     if (gen !== gameGeneration) return; // stale callback from old game
     animating = false;
-    if (!playgroundMode && gameMode !== 'online' && allPlaced() && checkWin()) return;
-    processExplosions(done);
+    if (!playgroundMode) {
+      // Safety net: a runaway/oscillating cascade should never be able to
+      // hang the game forever. Once a single cascade has gone on for an
+      // implausible number of steps, stop waiting for it to settle
+      // naturally and just check "does exactly one player currently own
+      // any squares" directly — if so, that's the winner.
+      if (_depth > 400) {
+        var counts = getCounts();
+        var owners = [];
+        for (var p = 0; p < NUM_PLAYERS; p++) if (placed[p] && counts[p] > 0) owners.push(p);
+        if (owners.length === 1) {
+          var winner = owners[0];
+          for (var p2 = 0; p2 < NUM_PLAYERS; p2++) {
+            if (p2 !== winner && alive[p2] && placed[p2]) {
+              alive[p2] = false; elimOrder.push(p2); elimInfo[p2] = { round: roundNum, killedBy: -1 };
+            }
+          }
+          alive[winner] = false; elimOrder.push(winner); elimInfo[winner] = { round: roundNum, killedBy: -1, isWinner: true };
+          renderSideLB(); renderPlayerBar();
+          if (gameMode === 'online') olShowWin(winner); else showWin(winner);
+          return;
+        }
+      }
+      if (gameMode === 'online') {
+        if (allPlaced() && olCheckWin()) return;
+      } else {
+        if (allPlaced() && checkWin()) return;
+      }
+    }
+    processExplosions(done, _depth);
   }, delay);
 }
 
@@ -2601,7 +2630,14 @@ function showOLPanel(id) {
     var el = document.getElementById(p); if (el) el.style.display = 'none';
   });
   var el = document.getElementById(id); if (el) el.style.display = '';
-  if (id === 'ol-create') buildOLCreateBtns();
+  if (id === 'ol-create') {
+    buildOLCreateBtns();
+    // Keep the toggle pills' visuals honest with their underlying checkboxes
+    ['ol-randomize-order', 'ol-tournament-mode'].forEach(function(cbId) {
+      var cb = $(cbId), tog = $(cbId.replace('-order', '-toggle').replace('-mode', '-toggle'));
+      if (cb && tog) tog.className = 'opt-toggle' + (cb.checked ? ' on' : '');
+    });
+  }
   if (id === 'ol-join') olLoadPublicRooms();
 }
 function hideOLPanels() {
