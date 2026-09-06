@@ -53,6 +53,7 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   }
   .player-tag .tag-top { display: flex; align-items: center; gap: 4px; }
+  .player-tag .tag-badges { display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
   .player-tag .pip { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .player-tag .tag-line { width: 100%; height: 1px; background: rgba(0,0,0,0.1); margin: 4px 0 3px; }
   .player-tag .count { font-size: 13px; font-weight: 800; }
@@ -79,7 +80,7 @@
 
   .side-lb {
     background: var(--ui-bg); color: var(--text-dark); border-radius: 14px;
-    padding: 0.8rem 1rem; min-width: 140px; max-width: 180px;
+    padding: 0.8rem 1rem; min-width: 140px;
     box-shadow: 0 2px 12px rgba(0,0,0,0.1); flex-shrink: 0;
   }
   .side-lb-title {
@@ -94,14 +95,40 @@
   }
   .side-lb-row .lb-rank { font-weight: 700; min-width: 20px; font-size: 11px; }
   .side-lb-row .lb-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .side-lb-row .lb-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side-lb-row .lb-name { font-weight: 500; white-space: nowrap; }
   .side-lb-row .lb-round { font-size: 10px; opacity: 0.5; white-space: nowrap; }
   .side-lb-row .lb-killer { font-size: 10px; opacity: 0.5; white-space: nowrap; }
   .side-lb-row.lb-alive { opacity: 0.4; }
 
+  .side-tourn-lb {
+    background: var(--ui-bg); color: var(--text-dark); border-radius: 14px;
+    padding: 0.8rem 1rem; min-width: 140px; max-width: 180px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.1); flex-shrink: 0;
+    visibility: hidden; pointer-events: none;
+  }
+  .side-tourn-lb.active { visibility: visible; pointer-events: auto; }
+  .side-tourn-lb-title {
+    font-size: 12px; font-weight: 700; margin-bottom: 0.5rem;
+    padding-bottom: 0.4rem; border-bottom: 1px solid #eee;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .side-tourn-row {
+    display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px;
+  }
+  .side-tourn-row .st-rank { font-weight: 700; min-width: 20px; font-size: 11px; }
+  .side-tourn-row .st-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .side-tourn-row .st-name { font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side-tourn-row .st-pts { font-weight: 700; font-size: 11px; white-space: nowrap; }
+  .side-tourn-lb-end {
+    margin-top: 8px; width: 100%; padding: 5px; font-size: 10px;
+    background: rgba(0,0,0,0.06); border: none; border-radius: 8px; cursor: pointer; color: var(--text-dark);
+  }
+
   @media (max-width: 700px) {
     .game-layout { flex-direction: column; align-items: stretch; }
     .side-lb { max-width: 100%; min-width: unset; width: 100%; order: -1; }
+    .side-tourn-lb { max-width: 100%; min-width: unset; width: 100%; order: -2; visibility: visible; display: none; }
+    .side-tourn-lb.active { display: block; }
     .grid-wrap { width: 100%; }
   }
   .grid {
@@ -132,13 +159,16 @@
   }
 
   .overlay {
-    position: absolute; inset: 0; background: rgba(0,0,0,0.45);
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
     display: flex; align-items: center; justify-content: center;
-    border-radius: 14px; z-index: 30; backdrop-filter: blur(4px);
+    z-index: 100; backdrop-filter: blur(4px);
+    overflow-y: auto; padding: 2rem 1rem;
   }
   .win-card {
     background: var(--ui-bg); border-radius: 20px; padding: 1.5rem 2rem;
     text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+    max-height: 85vh; overflow-y: auto; max-width: 90vw;
+    margin: auto;
   }
   .win-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 0.3rem; color: var(--text-dark); }
   .win-sub { font-size: 13px; color: #9a7a6a; margin-bottom: 1rem; }
@@ -255,7 +285,7 @@
     width: 90px; outline: none; color: var(--text-dark);
   }
   .cp-name:focus { border-color: var(--bg); }
-  .cp-swatches { display: flex; gap: 4px; flex-wrap: wrap; }
+  .cp-swatches { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; max-width: 280px; }
   .cp-swatch {
     width: 28px; height: 28px; border-radius: 50%; border: 2.5px solid transparent;
     cursor: pointer; transition: all 0.15s; position: relative;
@@ -267,6 +297,32 @@
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     font-size: 12px; font-weight: 800;
   }
+
+  /* GAME OPTION TOGGLES (randomize / tournament) */
+  .opt-toggle {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    padding: 10px 16px; margin: 6px auto 0; border-radius: 14px; max-width: 320px;
+    cursor: pointer; user-select: none; transition: all 0.15s;
+    background: rgba(0,0,0,0.06); border: 2px solid transparent;
+  }
+  .opt-toggle:hover { background: rgba(0,0,0,0.1); }
+  .opt-toggle.on {
+    background: linear-gradient(135deg, #6ecf6e, #4aa64a);
+    border-color: #3a8a3a; box-shadow: 0 2px 10px rgba(78,166,74,0.35);
+  }
+  .opt-toggle .opt-label { font-size: 14px; font-weight: 700; color: #6b3a2a; }
+  .opt-toggle.on .opt-label { color: #fff; }
+  .opt-toggle .opt-switch {
+    width: 40px; height: 22px; border-radius: 12px; background: #ccc;
+    position: relative; flex-shrink: 0; transition: background 0.15s;
+  }
+  .opt-toggle.on .opt-switch { background: rgba(255,255,255,0.4); }
+  .opt-toggle .opt-knob {
+    position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3); transition: transform 0.15s;
+  }
+  .opt-toggle.on .opt-knob { transform: translateX(18px); background: #fff; }
+  .opt-toggle .opt-icon { font-size: 16px; }
 
   /* MAIN MENU */
   .main-menu {
@@ -491,8 +547,12 @@
 <div class="player-bar" id="player-bar"></div>
 <div class="turn-label" id="turn-label"></div>
 <div class="round-label" id="round-label" style="font-size:12px;font-weight:600;opacity:0.7;text-align:center;margin-bottom:0.4rem;"></div>
-
 <div class="game-layout">
+  <div class="side-tourn-lb" id="side-tourn-lb">
+    <div class="side-tourn-lb-title">🏆 Tournament — <span id="side-tourn-round">Round 0</span></div>
+    <div id="side-tourn-list"></div>
+    <button class="side-tourn-lb-end" onclick="endTournamentFromSidebar()">End Tournament</button>
+  </div>
   <div class="grid-wrap" id="grid-wrap">
     <div class="grid" id="grid"></div>
     <div class="overlay" id="overlay" style="display:none;">
@@ -545,9 +605,18 @@
       <button class="mbtn secondary" onclick="cancelColourPicker()">Cancel</button>
     </div>
     <div style="margin-top:0.5rem;">
-      <label style="font-size:12px;color:#999;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-        <input type="checkbox" id="cp-randomize-order"> Randomize turn order
-      </label>
+      <div class="opt-toggle" id="cp-randomize-toggle" onclick="toggleOpt('cp-randomize-order','cp-randomize-toggle')">
+        <span class="opt-icon">🔀</span>
+        <span class="opt-label">Randomize turn order</span>
+        <span class="opt-switch"><span class="opt-knob"></span></span>
+      </div>
+      <div class="opt-toggle" id="cp-tournament-toggle" onclick="toggleOpt('cp-tournament-mode','cp-tournament-toggle')">
+        <span class="opt-icon">🏆</span>
+        <span class="opt-label">Tournament mode</span>
+        <span class="opt-switch"><span class="opt-knob"></span></span>
+      </div>
+      <input type="checkbox" id="cp-randomize-order" style="display:none;">
+      <input type="checkbox" id="cp-tournament-mode" style="display:none;">
     </div>
     </div>
   </div>
@@ -567,6 +636,12 @@ if (typeof firebase === 'undefined') {
 // Safe element accessor
 function $(id) { return document.getElementById(id); }
 function setDisplay(id, val) { var el = $(id); if (el) el.style.display = val; }
+function toggleOpt(checkboxId, toggleId) {
+  var cb = $(checkboxId), tog = $(toggleId);
+  if (!cb || !tog) return;
+  cb.checked = !cb.checked;
+  tog.className = 'opt-toggle' + (cb.checked ? ' on' : '');
+}
 
 var COLORS = [
   // Reds
@@ -683,6 +758,35 @@ var COLORS = [
   { name:'Graphite',  dot:'#404040', shadow:'#282828', dotCol:'#fff' },
 ];
 
+// Precomputed indices into COLORS, sorted in rainbow (hue) order — used for the colour picker display order
+function hexToHue(hex) {
+  hex = hex.replace('#', '');
+  var r = parseInt(hex.substr(0, 2), 16) / 255;
+  var g = parseInt(hex.substr(2, 2), 16) / 255;
+  var b = parseInt(hex.substr(4, 2), 16) / 255;
+  var max = Math.max(r, g, b), min = Math.min(r, g, b);
+  var h, d = max - min;
+  var l = (max + min) / 2;
+  var s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (d === 0) h = 0;
+  else if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h = h * 60; if (h < 0) h += 360;
+  return { h: h, s: s, l: l };
+}
+var COLORS_ALPHA_ORDER = (function() {
+  var chromatic = [], neutrals = [];
+  for (var i = 0; i < COLORS.length; i++) {
+    var hsl = hexToHue(COLORS[i].dot);
+    if (hsl.s < 0.12) neutrals.push({ i: i, l: hsl.l });
+    else chromatic.push({ i: i, h: hsl.h });
+  }
+  chromatic.sort(function(a, b) { return a.h - b.h; });
+  neutrals.sort(function(a, b) { return b.l - a.l; }); // light to dark
+  return chromatic.map(function(x) { return x.i; }).concat(neutrals.map(function(x) { return x.i; }));
+})();
+
 var colorMap = []; // colorMap[playerIndex] = COLORS index
 var playerNames = []; // playerNames[playerIndex] = display name
 var elimOrder = []; // tracks elimination order (last = died first)
@@ -698,6 +802,144 @@ var randomizeEnabled = false;
 var turnQueue = [];
 var currentRoundOrder = [];
 var matchOrder = []; // shuffled once per match, reused every round
+
+// ======== TOURNAMENT MODE ========
+var tournamentActive = false;
+var tournamentScores = {}; // identity -> { points, games, best }
+var tournamentRound = 0;
+// Points awarded for placements 1st-35th. Beyond 35th place, 0 points.
+var TOURNAMENT_POINTS = [100,90,85,80,75,70,66,62,58,54,50,47,44,41,38,35,32,29,26,23,20,18,16,14,12,10,9,8,7,6,5,4,3,2,1];
+
+function tournamentPointsForRank(rank) {
+  if (rank < 1 || rank > TOURNAMENT_POINTS.length) return 0;
+  return TOURNAMENT_POINTS[rank - 1];
+}
+
+function tournamentIdentity(i) {
+  if (isAIPlayer[i]) {
+    // AIs are tracked by colour since their colour stays the same across rounds
+    return PC(i).name + ' AI';
+  }
+  return PN(i);
+}
+
+function recordTournamentRound() {
+  if (!tournamentActive) return;
+  tournamentRound++;
+  for (var e = 0; e < elimOrder.length; e++) {
+    var pi = elimOrder[e];
+    var rank = elimOrder.length - e;
+    var pts = tournamentPointsForRank(rank);
+    var id = tournamentIdentity(pi);
+    if (!tournamentScores[id]) tournamentScores[id] = { points: 0, games: 0, best: Infinity, color: PC(pi).dot };
+    tournamentScores[id].points += pts;
+    tournamentScores[id].games++;
+    tournamentScores[id].color = PC(pi).dot;
+    if (rank < tournamentScores[id].best) tournamentScores[id].best = rank;
+  }
+}
+
+function renderTournamentStandings(container) {
+  if (!tournamentActive) return;
+  var old = container.querySelector('.tournament-standings');
+  if (old) old.remove();
+  var div = document.createElement('div');
+  div.className = 'tournament-standings';
+  div.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid rgba(0,0,0,0.1);text-align:left;font-size:12px;color:var(--text-dark);';
+  var title = document.createElement('div');
+  title.style.cssText = 'font-weight:700;margin-bottom:6px;text-align:center;';
+  title.textContent = 'Tournament Standings — Round ' + tournamentRound;
+  div.appendChild(title);
+  var entries = [];
+  for (var id in tournamentScores) entries.push({ id: id, data: tournamentScores[id] });
+  entries.sort(function(a, b) { return b.data.points - a.data.points; });
+  for (var i = 0; i < entries.length; i++) {
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0;';
+    var medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i + 1);
+    var pip = document.createElement('span');
+    pip.style.cssText = 'width:8px;height:8px;border-radius:50%;display:inline-block;background:' + (entries[i].data.color || '#999') + ';';
+    row.innerHTML = '<span style="font-weight:700;min-width:22px;">' + medal + '</span>';
+    row.appendChild(pip);
+    var nameSpan = document.createElement('span');
+    nameSpan.textContent = entries[i].id;
+    nameSpan.style.cssText = 'flex:1;';
+    row.appendChild(nameSpan);
+    var ptsSpan = document.createElement('span');
+    ptsSpan.style.cssText = 'font-weight:700;';
+    ptsSpan.textContent = entries[i].data.points + ' pts';
+    row.appendChild(ptsSpan);
+    div.appendChild(row);
+  }
+  var endBtn = document.createElement('button');
+  endBtn.className = 'btn';
+  endBtn.textContent = 'End Tournament';
+  endBtn.style.cssText = 'margin-top:8px;width:100%;padding:6px;font-size:11px;background:rgba(0,0,0,0.08);';
+  if (gameMode === 'online' && !isHost) {
+    endBtn.disabled = true;
+    endBtn.style.opacity = '0.4';
+    endBtn.style.cursor = 'default';
+    endBtn.textContent = 'Only host can end tournament';
+  } else {
+    endBtn.onclick = function() {
+      endTournament();
+      if (gameMode === 'online' && channel) channel.publish('endtournament', {});
+    };
+  }
+  div.appendChild(endBtn);
+  container.appendChild(div);
+}
+
+function endTournament() {
+  tournamentActive = false;
+  tournamentScores = {};
+  tournamentRound = 0;
+  var el = document.querySelector('.tournament-standings');
+  if (el) el.remove();
+  var paBtn = document.getElementById('play-again-btn');
+  if (paBtn && (paBtn.textContent === 'Next round')) paBtn.textContent = 'Play again';
+  updateTournamentBar();
+}
+
+function endTournamentFromSidebar() {
+  if (!confirm('End the tournament?')) return;
+  endTournament();
+  if (gameMode === 'online' && channel) channel.publish('endtournament', {});
+}
+
+// Keeps the always-visible left-hand tournament sidebar in sync — shown any
+// time a tournament is active, hidden otherwise.
+function updateTournamentBar() {
+  var el = $('side-tourn-lb');
+  if (el) el.className = 'side-tourn-lb' + (tournamentActive ? ' active' : '');
+  if (tournamentActive) renderSideTournamentLB();
+}
+
+function renderSideTournamentLB() {
+  if (!tournamentActive) return;
+  var roundEl = $('side-tourn-round');
+  if (roundEl) roundEl.textContent = 'Round ' + tournamentRound;
+  var list = $('side-tourn-list');
+  if (!list) return;
+  list.innerHTML = '';
+  var entries = [];
+  for (var id in tournamentScores) entries.push({ id: id, data: tournamentScores[id] });
+  entries.sort(function(a, b) { return b.data.points - a.data.points; });
+  if (entries.length === 0) {
+    list.innerHTML = '<div style="font-size:11px;color:#bbb;font-style:italic;">No rounds played yet</div>';
+    return;
+  }
+  for (var i = 0; i < entries.length; i++) {
+    var row = document.createElement('div');
+    row.className = 'side-tourn-row';
+    var medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i + 1);
+    row.innerHTML = '<span class="st-rank">' + medal + '</span>' +
+      '<span class="st-pip" style="background:' + (entries[i].data.color || '#999') + ';"></span>' +
+      '<span class="st-name">' + entries[i].id + '</span>' +
+      '<span class="st-pts">' + entries[i].data.points + '</span>';
+    list.appendChild(row);
+  }
+}
 function PC(i) { var ci = colorMap[i]; return ci >= 0 ? COLORS[ci] : { name:'?', dot:'#999', shadow:'#666', dotCol:'#fff' }; }
 function PN(i) { return playerNames[i] || PC(i).name; } // get name for player i
 function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i++) colorMap.push(i); }
@@ -705,7 +947,7 @@ function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i
 var SIZE = 5, NUM_HUMANS = 1, NUM_AIS = 1, NUM_PLAYERS = 2;
 var SIZES = [5, 8, 10, 12, 15, 20, 25, 30];
 var AI_DIFFICULTY = 'random';
-var AI_DIFFICULTIES = ['subhuman', 'dumbass', 'random', 'human', 'smart'];
+var AI_DIFFICULTIES = ['dumbass', 'random', 'subhuman', 'human', 'smart'];
 var AI_DIFFICULTY_LABELS = { subhuman: 'Subhuman', dumbass: 'Dumbass', random: 'Random', human: 'Human', smart: 'Smart' };
 
 function buildDifficultyButtons() {
@@ -811,13 +1053,35 @@ function aiHasAdjacentOpponentTwo(b, size, r, c, turn) {
   return false;
 }
 
-// Finds own 3s that can safely grab an adjacent opponent 2 — solitary (no
-// 3 two squares away that could snipe the capture back) with an opponent's
-// 2 one square away. This is what keeps it from taking a 2 that's
-// protected by a 3.
+// Checks whether clicking our own 3 at (r,c) would safely capture at least
+// one adjacent opponent's 2, with NO risk of it being immediately recaptured.
+// For every orthogonal neighbor that's another player's 2 (the thing we'd be
+// capturing), we check the cells orthogonally adjacent to THAT neighbor for
+// any other 3-dot cell — belonging to ANY player, not just the one whose 2
+// we're taking. A third party sitting next to that square is just as
+// capable of sniping the capture back as the original owner would be, so
+// their 3 blocks the move exactly the same way an opposing 3 does.
+function aiWouldTwoCaptureBeSafe(b, size, r, c, turn) {
+  var nbrs = aiOrthoNeighbors(r, c, size);
+  var hasCapturableTwo = false;
+  for (var i = 0; i < nbrs.length; i++) {
+    var nr = nbrs[i][0], nc = nbrs[i][1];
+    var cell = b[nr][nc];
+    if (cell.owner < 0 || cell.owner === turn || cell.dots !== 2) continue;
+    hasCapturableTwo = true;
+    var snipeSpots = aiOrthoNeighbors(nr, nc, size);
+    for (var j = 0; j < snipeSpots.length; j++) {
+      var sr = snipeSpots[j][0], sc = snipeSpots[j][1];
+      if (sr === r && sc === c) continue; // this is our own clicking cell, not a threat
+      if (b[sr][sc].dots === 3) return false; // any player's 3 here can recapture — opponent OR third party
+    }
+  }
+  return hasCapturableTwo;
+}
+
 function aiPickSafeTwoCapture(own, b, size, turn) {
   var candidates = own.filter(function(p) {
-    return b[p[0]][p[1]].dots === 3 && aiIsSolitaryThree(b, size, p[0], p[1]) && aiHasAdjacentOpponentTwo(b, size, p[0], p[1], turn);
+    return b[p[0]][p[1]].dots === 3 && aiWouldTwoCaptureBeSafe(b, size, p[0], p[1], turn);
   });
   if (!candidates.length) return null;
   var bestLen = -1, best = [];
@@ -1071,6 +1335,7 @@ function resetGame() {
 function startGameWithColours() {
   gameStarted = true;
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
+  updateTournamentBar();
   if (isAI(turn)) setTimeout(aiMove, 400);
 }
 
@@ -1130,9 +1395,11 @@ function renderColourPicker() {
 
     var swatches = document.createElement('div');
     swatches.className = 'cp-swatches';
-    for (var ci = 0; ci < COLORS.length; ci++) {
+    for (var _k = 0; _k < COLORS_ALPHA_ORDER.length; _k++) {
+      var ci = COLORS_ALPHA_ORDER[_k];
       var sw = document.createElement('div');
       sw.className = 'cp-swatch';
+      sw.title = COLORS[ci].name;
       sw.style.background = COLORS[ci].dot;
       if (COLORS[ci].dotCol === '#333') sw.style.border = '2px solid #ccc';
       if (COLORS[ci].dot === '#2a2a2a') sw.style.border = '2px solid #666';
@@ -1235,6 +1502,11 @@ function confirmColours() {
     matchOrder = [];
     for (var i = 0; i < NUM_PLAYERS; i++) matchOrder.push(i);
   }
+  // Tournament mode
+  var tcb = $('cp-tournament-mode');
+  tournamentActive = !!(tcb && tcb.checked);
+  tournamentScores = {};
+  tournamentRound = 0;
   setDisplay('cp-panel', 'none');
   startGameWithColours();
 }
@@ -1290,6 +1562,13 @@ function renderSideLB() {
       else killerEl.textContent = '—';
       row.appendChild(killerEl);
 
+      if (tournamentActive) {
+        var ptsEl = document.createElement('span');
+        ptsEl.style.cssText = 'font-size:10px;font-weight:700;color:#e8b84c;white-space:nowrap;';
+        ptsEl.textContent = '+' + tournamentPointsForRank(rank) + 'pts';
+        row.appendChild(ptsEl);
+      }
+
       list.appendChild(row);
     }
   }
@@ -1308,7 +1587,11 @@ function renderSideLB() {
         var pi = sorted[k];
         var kr = document.createElement('div');
         kr.className = 'side-lb-row';
-        kr.innerHTML = '<span class="lb-rank" style="font-size:12px;">' + killCounts[pi] + '</span><span style="display:flex;align-items:center;gap:4px;"><span class="lb-pip" style="background:'+PC(pi).dot+'"></span><span class="lb-name">' + PN(pi) + '</span></span><span></span><span></span>';
+        var elimTag = '';
+        if (!alive[pi] && !(elimInfo[pi] && elimInfo[pi].isWinner)) {
+          elimTag = '<span style="font-size:8px;font-weight:800;color:#fff;background:#e04040;padding:1px 4px;border-radius:5px;letter-spacing:0.02em;margin-left:4px;">ELIMINATED</span>';
+        }
+        kr.innerHTML = '<span class="lb-rank" style="font-size:12px;">' + killCounts[pi] + '</span><span style="display:flex;align-items:center;gap:4px;overflow:hidden;"><span class="lb-pip" style="background:'+PC(pi).dot+'"></span><span class="lb-name">' + PN(pi) + '</span>' + elimTag + '</span><span></span><span></span>';
         killDiv.appendChild(kr);
       }
       list.appendChild(killDiv);
@@ -1324,8 +1607,9 @@ function updateBodyPadding() {
     document.body.style.paddingLeft = '';
     document.body.style.paddingRight = '';
   } else {
-    document.body.style.paddingLeft = SIZE >= 30 ? '0' : '5rem';
-    document.body.style.paddingRight = '';
+    var pad = SIZE >= 30 ? '0' : '5rem';
+    document.body.style.paddingLeft = pad;
+    document.body.style.paddingRight = pad;
   }
 }
 
@@ -1426,22 +1710,34 @@ function renderPlayerBar() {
     var txt = PN(i);
     if (isAI(i)) txt += ' ᴬᴵ';
     top.appendChild(document.createTextNode(txt));
+    tag.appendChild(top);
+
+    // Badges (placement, ELIMINATED, win star) get their own centered row so
+    // they never pull the pip+name row off-center for tags that have them.
+    var badges = document.createElement('div');
+    badges.className = 'tag-badges';
     if (!alive[i]) {
       var place = elimOrder.indexOf(i);
       if (place >= 0) {
         var plc = document.createElement('span');
-        plc.style.cssText = 'font-size:9px;opacity:0.6;margin-left:3px;';
+        plc.style.cssText = 'font-size:9px;opacity:0.6;';
         plc.textContent = '#' + (NUM_PLAYERS - place);
-        top.appendChild(plc);
+        badges.appendChild(plc);
+      }
+      if (killCounts[i] > 0 && !(elimInfo[i] && elimInfo[i].isWinner)) {
+        var elimBadge = document.createElement('span');
+        elimBadge.style.cssText = 'font-size:9px;font-weight:800;color:#fff;background:#e04040;padding:1px 5px;border-radius:6px;letter-spacing:0.02em;';
+        elimBadge.textContent = 'ELIMINATED';
+        badges.appendChild(elimBadge);
       }
     }
     if (wins[i] > 0) {
       var w = document.createElement('span');
-      w.style.cssText = 'font-size:9px;opacity:0.5;margin-left:2px;';
+      w.style.cssText = 'font-size:9px;opacity:0.5;';
       w.textContent = '★' + wins[i];
-      top.appendChild(w);
+      badges.appendChild(w);
     }
-    tag.appendChild(top);
+    if (badges.children.length > 0) tag.appendChild(badges);
 
     var line = document.createElement('div');
     line.className = 'tag-line';
@@ -1450,7 +1746,7 @@ function renderPlayerBar() {
     var cnt = document.createElement('div');
     cnt.className = 'count';
     cnt.id = 'cnt-' + i;
-    cnt.textContent = dotCounts[i] + ' ●  ' + counts[i] + ' ■';
+    cnt.textContent = dotCounts[i] + ' ● ' + counts[i] + ' ■';
     cnt.style.fontSize = '11px';
     tag.appendChild(cnt);
 
@@ -1854,12 +2150,16 @@ function showWin(p) {
   lb += '</div>';
   sub.innerHTML = lb;
   var paBtn = document.getElementById('play-again-btn');
-  paBtn.textContent = 'Play again';
+  recordTournamentRound();
+  renderSideTournamentLB();
+  paBtn.textContent = tournamentActive ? 'Next round' : 'Play again';
   paBtn.style.opacity = '';
   paBtn.style.cursor = '';
   paBtn.style.display = '';
   var _ov = document.getElementById('overlay'); if (_ov) _ov.style.display = 'flex';
-  renderPlayerBar();
+  try { renderPlayerBar(); } catch (e) { console.warn('renderPlayerBar failed in showWin:', e); }
+  var card = document.querySelector('.win-card');
+  if (card) { try { renderTournamentStandings(card); } catch (e) { console.warn('renderTournamentStandings failed:', e); } }
 }
 
 function updateUI() {
@@ -2152,6 +2452,10 @@ function goMainMenu() {
   gameMode = 'local';
   animating = false;
   pgAnimating = false;
+  tournamentActive = false;
+  tournamentScores = {};
+  tournamentRound = 0;
+  var stlb = $('side-tourn-lb'); if (stlb) stlb.className = 'side-tourn-lb';
   gameGeneration++;
   pgGeneration++;
   updateBodyPadding();
@@ -2215,9 +2519,18 @@ function playAgain() {
             newColorMap.push(-1); // placeholder, assign later
           }
         }
-        // Assign colors for AIs and any unassigned humans
+        // Assign colors for AIs — preserve by ordinal position (1st AI keeps its colour, 2nd AI keeps its colour, etc.)
+        var oldAIColors = [];
+        for (var i = NUM_HUMANS; i < NUM_PLAYERS; i++) {
+          if (colorMap[i] !== undefined) oldAIColors.push(colorMap[i]);
+        }
         for (var i = 0; i < olAIs; i++) {
-          newColorMap.push(-1);
+          if (i < oldAIColors.length && !usedColors[oldAIColors[i]]) {
+            newColorMap.push(oldAIColors[i]);
+            usedColors[oldAIColors[i]] = true;
+          } else {
+            newColorMap.push(-1);
+          }
         }
         for (var i = 0; i < newColorMap.length; i++) {
           if (newColorMap[i] === -1) {
@@ -2570,9 +2883,11 @@ function renderOLColourPicker() {
       // Show swatches for own slot
       var swatches = document.createElement('div');
       swatches.className = 'cp-swatches';
-      for (var ci = 0; ci < COLORS.length; ci++) {
+      for (var _k = 0; _k < COLORS_ALPHA_ORDER.length; _k++) {
+        var ci = COLORS_ALPHA_ORDER[_k];
         var sw = document.createElement('div');
         sw.className = 'cp-swatch';
+        sw.title = COLORS[ci].name;
         sw.style.background = COLORS[ci].dot;
         if (COLORS[ci].dotCol === '#333') sw.style.border = '2px solid #ccc';
         if (COLORS[ci].dot === '#2a2a2a') sw.style.border = '2px solid #666';
@@ -2683,7 +2998,7 @@ function olConfirmColours() {
     }
   }
 
-  channel.publish('start', { size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap, shuffledOrder: shuffledOrder, randomizeEnabled: !!(rcb && rcb.checked) });
+  channel.publish('start', { size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap, shuffledOrder: shuffledOrder, randomizeEnabled: !!(rcb && rcb.checked), tournamentEnabled: !!($('ol-tournament-mode') && $('ol-tournament-mode').checked) });
 }
 
 function onOLStart(msg) {
@@ -2692,6 +3007,9 @@ function onOLStart(msg) {
   if (!isHost) detachLobbyListener(); // non-host doesn't need lobby during game
   gameStarted = true;
   randomizeEnabled = !!d.randomizeEnabled;
+  tournamentActive = !!d.tournamentEnabled;
+  tournamentScores = {};
+  tournamentRound = 0;
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
   NUM_HUMANS = NUM_PLAYERS - NUM_AIS;
   mySlot = -1;
@@ -2737,6 +3055,7 @@ function onOLStart(msg) {
   setDisplay('online-info', '');
   document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
+  updateTournamentBar();
   olScheduleAI();
   updateSpectatorList();
 }
@@ -2869,9 +3188,12 @@ function olShowWin(p) {
   sub.innerHTML = lb;
   // Remove old host settings
   var oldS = document.querySelector('.win-host-settings'); if (oldS) oldS.remove();
+  recordTournamentRound();
+  renderSideTournamentLB();
   var paBtn = document.getElementById('play-again-btn');
+  try {
   if (isHost) {
-    paBtn.textContent = 'Play again';
+    paBtn.textContent = tournamentActive ? 'Next round' : 'Play again';
     paBtn.style.opacity = '';
     paBtn.style.cursor = '';
     paBtn.style.display = '';
@@ -2933,8 +3255,11 @@ function olShowWin(p) {
     paBtn.style.opacity = '0.5';
     paBtn.style.cursor = 'default';
   }
+  } catch (e) { console.warn('host settings build failed in olShowWin:', e); }
   var _ov = document.getElementById('overlay'); if (_ov) _ov.style.display = 'flex';
-  renderPlayerBar();
+  try { renderPlayerBar(); } catch (e) { console.warn('renderPlayerBar failed in olShowWin:', e); }
+  var card2 = document.querySelector('.win-card');
+  if (card2) { try { renderTournamentStandings(card2); } catch (e) { console.warn('renderTournamentStandings failed:', e); } }
 }
 
 function olLeave() {
@@ -3897,6 +4222,7 @@ olJoinRoom = function() {
       }
     });
     channel.subscribe('hostmigrate', onHostMigrate);
+    channel.subscribe('endtournament', function() { endTournament(); });
     channel.subscribe('kick', function(msg) {
       if (msg.data && msg.data.targetId === myClientId) {
         alert('You have been kicked from the room.');
@@ -4123,6 +4449,7 @@ onOLNewGame = function(msg) {
   if (randomizeEnabled && isHost) shuffleMatchOrder();
 
   initBoard(); applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
+  updateTournamentBar();
   moveQueue = []; processing = false;
   olScheduleAI();
   // Update presence — if we joined as player, clear spectator flag
@@ -4306,9 +4633,18 @@ function loadMainPublicRooms() {
       <button class="sbtn" id="vis-private" onclick="olVisibility='private';document.getElementById('vis-private').className='sbtn active';document.getElementById('vis-public').className='sbtn';">Private</button>
     </div>
     <div style="margin-top:0.4rem;">
-      <label style="font-size:12px;color:#999;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-        <input type="checkbox" id="ol-randomize-order"> Randomize turn order
-      </label>
+      <div class="opt-toggle" id="ol-randomize-toggle" onclick="toggleOpt('ol-randomize-order','ol-randomize-toggle')">
+        <span class="opt-icon">🔀</span>
+        <span class="opt-label">Randomize turn order</span>
+        <span class="opt-switch"><span class="opt-knob"></span></span>
+      </div>
+      <div class="opt-toggle" id="ol-tournament-toggle" onclick="toggleOpt('ol-tournament-mode','ol-tournament-toggle')">
+        <span class="opt-icon">🏆</span>
+        <span class="opt-label">Tournament mode</span>
+        <span class="opt-switch"><span class="opt-knob"></span></span>
+      </div>
+      <input type="checkbox" id="ol-randomize-order" style="display:none;">
+      <input type="checkbox" id="ol-tournament-mode" style="display:none;">
     </div>
     <div style="margin-top:0.6rem;">
       <button class="mbtn primary" onclick="olCreateRoom()">Create</button>
