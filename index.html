@@ -3638,22 +3638,9 @@ if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
   firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
 }
 
-// ======== ACCOUNT SIGN-IN (Google or email/password — both free, both tie
-// one real account to one username) ========
-var isGoogleLinked = false; // true whenever ANY real (non-anonymous) account is linked, Google or email
-
-function signInWithGoogle() {
-  if (!db || typeof firebase === 'undefined') { alert('Not available right now.'); return; }
-  var provider = new firebase.auth.GoogleAuthProvider();
-  firebase.auth().signInWithPopup(provider).then(function(result) {
-    applyLinkedUser(result.user);
-  }).catch(function(e) {
-    console.warn('Google sign-in failed:', e);
-    if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
-      alert('Google sign-in failed. Try again.');
-    }
-  });
-}
+// ======== ACCOUNT SIGN-IN (email/password — free, ties one real account to
+// one username) ========
+var isGoogleLinked = false; // true whenever a real (non-anonymous) email account is linked — name kept for minimal diff, no Google involved anymore
 
 function toggleEmailForm() {
   var form = $('email-form');
@@ -3711,20 +3698,19 @@ function signOutGoogle() {
 }
 
 function updateGoogleButtons() {
-  setDisplay('google-signin-btn', isGoogleLinked ? 'none' : '');
   setDisplay('email-signin-btn', isGoogleLinked ? 'none' : '');
   setDisplay('google-signout-btn', isGoogleLinked ? '' : 'none');
   if (isGoogleLinked) setDisplay('email-form', 'none');
 }
 
-// A username, chat, and online play all require a linked real account
-// (Google or email) — this is the single gate every one of those entry
-// points checks first.
+// A username, chat, and online play all require a linked real (email)
+// account — this is the single gate every one of those entry points checks
+// first.
 function requireGoogleSignIn(actionLabel) {
   if (isGoogleLinked) return true;
-  if (confirm('Sign in to ' + actionLabel + '.\n\nClick OK to sign in with Google — or use the ✉️ Email button for any email address, including Outlook.')) {
-    signInWithGoogle();
-  }
+  alert('Sign in to ' + actionLabel + '.\n\nClick the ✉️ Sign in button (top right) with any email address.');
+  var form = $('email-form');
+  if (form) form.style.display = '';
   return false;
 }
 
@@ -4099,12 +4085,12 @@ function updateChatUsernameNotice() {
   var unlocked = myUsername && isGoogleLinked;
   if (notice) {
     notice.style.display = unlocked ? 'none' : '';
-    notice.textContent = isGoogleLinked ? 'Set a username (top right) to send messages' : 'Sign in with Google (top right) to chat';
+    notice.textContent = isGoogleLinked ? 'Set a username (top right) to send messages' : 'Sign in (top right) to chat';
   }
   var inp = $('chat-input');
   if (inp) {
     inp.disabled = !unlocked;
-    inp.placeholder = unlocked ? 'Type a message…' : (isGoogleLinked ? 'Set a username first' : 'Sign in with Google first');
+    inp.placeholder = unlocked ? 'Type a message…' : (isGoogleLinked ? 'Set a username first' : 'Sign in first');
   }
 }
 
@@ -5112,8 +5098,7 @@ function loadMainPublicRooms() {
   <span class="uname-display" id="uname-display"></span>
   <input type="text" id="uname-input" placeholder="Enter username" maxlength="16">
   <button class="set-btn" id="uname-btn" onclick="toggleUsernameEdit()">Set username</button>
-  <button class="set-btn" id="google-signin-btn" onclick="signInWithGoogle()" style="background:rgba(255,255,255,0.35);" title="Link a Google account so you keep your account even after clearing browser data, and so it can't be duplicated">🔑 Google</button>
-  <button class="set-btn" id="email-signin-btn" onclick="toggleEmailForm()" style="background:rgba(255,255,255,0.35);" title="Sign in with any email address — Outlook, Gmail, etc.">✉️ Email</button>
+  <button class="set-btn" id="email-signin-btn" onclick="toggleEmailForm()" style="background:rgba(255,255,255,0.35);" title="Sign in with any email address">✉️ Sign in</button>
   <button class="set-btn" id="google-signout-btn" onclick="signOutGoogle()" style="display:none;background:rgba(255,255,255,0.2);">Sign out</button>
 
   <div id="email-form" style="display:none;position:absolute;top:100%;right:0;margin-top:6px;background:var(--ui-bg);color:var(--text-dark);border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,0.25);width:220px;">
