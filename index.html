@@ -54,6 +54,7 @@
   }
   .player-tag .tag-top { display: flex; align-items: center; gap: 4px; }
   .player-tag .tag-badges { display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+  @keyframes pulse-disc { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
   .player-tag .pip { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .player-tag .tag-line { width: 100%; height: 1px; background: rgba(0,0,0,0.1); margin: 4px 0 3px; }
   .player-tag .count { font-size: 13px; font-weight: 800; }
@@ -481,7 +482,14 @@
   }
 
   @media (max-width: 600px) {
-
+    .username-bar {
+      left: 8px; right: 8px; top: 8px; flex-wrap: wrap; justify-content: flex-end;
+      padding: 5px 10px; gap: 5px; max-width: calc(100vw - 16px);
+    }
+    .username-bar input { width: 90px; font-size: 12px; padding: 4px 8px; }
+    .username-bar .set-btn { padding: 4px 8px; font-size: 11px; }
+    .username-bar .uname-display { font-size: 12px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #email-form { width: 180px !important; right: 8px !important; }
   }
 </style>
 </head>
@@ -495,8 +503,8 @@
     <button class="main-btn btn-playground" onclick="showPlayground()">Playground</button>
   </div>
   <div class="main-menu-btns" style="margin-top:0;">
-    <button class="main-btn btn-online" onclick="showOLPanel('ol-create')">Create Room</button>
-    <button class="main-btn btn-online" onclick="showOLPanel('ol-join')" style="background:#4db6ac;">Join Room</button>
+    <button class="main-btn btn-online" onclick="goOnlinePanel('ol-create')">Create Room</button>
+    <button class="main-btn btn-online" onclick="goOnlinePanel('ol-join')" style="background:#4db6ac;">Join Room</button>
   </div>
   <button class="help-link" onclick="showOLPanel('ol-help')">How to play</button>
   <div class="demo-wrap">
@@ -1019,38 +1027,6 @@ function aiPickCapture(own, b, size, turn) {
     else if (len === bestLen) best.push(threeAdj[i]);
   }
   return best[Math.floor(Math.random() * best.length)];
-}
-
-// Cells at EXACT taxicab (Manhattan) distance 2 — 2 squares away in a
-// straight line, or 1 square away diagonally.
-function aiTaxicabTwoCells(r, c, size) {
-  var offsets = [[-2,0],[2,0],[0,-2],[0,2],[-1,-1],[-1,1],[1,-1],[1,1]];
-  var res = [];
-  for (var i = 0; i < offsets.length; i++) {
-    var nr = r + offsets[i][0], nc = c + offsets[i][1];
-    if (nr >= 0 && nr < size && nc >= 0 && nc < size) res.push([nr, nc]);
-  }
-  return res;
-}
-
-// A 3 is "solitary" if no other 3-dot cell sits exactly 2 squares away
-// taxicab-wise — i.e. nothing positioned to recapture the cell it's about
-// to grab.
-function aiIsSolitaryThree(b, size, r, c) {
-  var cells = aiTaxicabTwoCells(r, c, size);
-  for (var i = 0; i < cells.length; i++) {
-    if (b[cells[i][0]][cells[i][1]].dots === 3) return false;
-  }
-  return true;
-}
-
-function aiHasAdjacentOpponentTwo(b, size, r, c, turn) {
-  var nbrs = aiOrthoNeighbors(r, c, size);
-  for (var i = 0; i < nbrs.length; i++) {
-    var cell = b[nbrs[i][0]][nbrs[i][1]];
-    if (cell.owner >= 0 && cell.owner !== turn && cell.dots === 2) return true;
-  }
-  return false;
 }
 
 // Checks whether clicking our own 3 at (r,c) would safely capture at least
@@ -1736,6 +1712,13 @@ function renderPlayerBar() {
       w.style.cssText = 'font-size:9px;opacity:0.5;';
       w.textContent = '★' + wins[i];
       badges.appendChild(w);
+    }
+    if (gameMode === 'online' && typeof localPendingDisconnects !== 'undefined' && localPendingDisconnects[i]) {
+      var secsLeft = Math.max(0, Math.ceil((localPendingDisconnects[i].deadline - Date.now()) / 1000));
+      var discBadge = document.createElement('span');
+      discBadge.style.cssText = 'font-size:9px;font-weight:700;color:#fff;background:#d88a20;padding:1px 6px;border-radius:6px;letter-spacing:0.01em;animation:pulse-disc 1s infinite;';
+      discBadge.textContent = '🔌 Reconnecting… (' + secsLeft + 's)';
+      badges.appendChild(discBadge);
     }
     if (badges.children.length > 0) tag.appendChild(badges);
 
@@ -3042,6 +3025,7 @@ function onOLStart(msg) {
   olUpdateLobbyPresence(onlinePlayers.length, true);
   if (!isHost) detachLobbyListener(); // non-host doesn't need lobby during game
   gameStarted = true;
+  saveActiveRoomRecord();
   randomizeEnabled = !!d.randomizeEnabled;
   tournamentActive = !!d.tournamentEnabled;
   tournamentScores = {};
@@ -3156,6 +3140,22 @@ function olAdvanceTurn() {
   olScheduleAI();
 }
 
+// Applied by clients who are already playing when someone joins mid-round-0
+// and takes over a not-yet-placed AI slot — keeps everyone's view of who's
+// human vs AI in sync without going through the spectator-only sync path.
+function onSlotConvert(msg) {
+  var d = msg.data;
+  if (d.slot === undefined) return;
+  isAIPlayer[d.slot] = false;
+  playerNames[d.slot] = d.name;
+  if (olSlotMapStored) {
+    var already = false;
+    for (var i = 0; i < olSlotMapStored.length; i++) if (olSlotMapStored[i].slot === d.slot) { already = true; olSlotMapStored[i].clientId = d.clientId; olSlotMapStored[i].name = d.name; }
+    if (!already) olSlotMapStored.push({ clientId: d.clientId, name: d.name, slot: d.slot });
+  }
+  renderPlayerBar();
+}
+
 function olScheduleAI() {
   if (!isAI(turn) || !alive[turn]) return;
   if (!isHost) return;
@@ -3163,6 +3163,7 @@ function olScheduleAI() {
 }
 
 function olDoAI() {
+  if (!isAI(turn)) return; // slot may have just been converted to a human mid-flight
   if (animating) { setTimeout(olDoAI, 100); return; }
   var pick;
   if (!placed[turn]) {
@@ -3300,6 +3301,7 @@ function olShowWin(p) {
 
 function olLeave() {
   olLeaveLobbyChannel();
+  clearActiveRoomRecord();
   showRoomChatTab(false);
   if (channel) { try { channel.presence.leave(); channel.detach(); } catch(e) {} channel = null; }
   gameMode = 'local'; mySlot = -1;
@@ -3483,7 +3485,8 @@ function demoStep() {
   });
 }
 
-function demoProcessExplosions(done) {
+function demoProcessExplosions(done, _depth) {
+  _depth = (_depth || 0) + 1;
   var toExplode = [];
   for (var r = 0; r < DEMO_SIZE; r++)
     for (var c = 0; c < DEMO_SIZE; c++)
@@ -3523,7 +3526,24 @@ function demoProcessExplosions(done) {
     }
   }
 
-  setTimeout(function() { demoProcessExplosions(done); }, 320);
+  // Safety net: a runaway/oscillating demo cascade should never hang the
+  // main menu forever. Once one cascade has gone on for an implausible
+  // number of steps, stop waiting for it to settle and just check directly
+  // whether only one colour currently owns any squares.
+  if (_depth > 150) {
+    var owners = {};
+    for (var rr = 0; rr < DEMO_SIZE; rr++)
+      for (var cc = 0; cc < DEMO_SIZE; cc++)
+        if (demoBoard[rr][cc].owner >= 0) owners[demoBoard[rr][cc].owner] = true;
+    var ownerKeys = Object.keys(owners);
+    if (ownerKeys.length <= 1) {
+      for (var p = 0; p < DEMO_PLAYERS; p++) demoAlive[p] = (String(p) === ownerKeys[0]);
+      done();
+      return;
+    }
+  }
+
+  setTimeout(function() { demoProcessExplosions(done, _depth); }, 320);
 }
 
 function demoGetCenter(r, c) {
@@ -3618,6 +3638,145 @@ if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
   firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
 }
 
+// ======== ACCOUNT SIGN-IN (Google or email/password — both free, both tie
+// one real account to one username) ========
+var isGoogleLinked = false; // true whenever ANY real (non-anonymous) account is linked, Google or email
+
+function signInWithGoogle() {
+  if (!db || typeof firebase === 'undefined') { alert('Not available right now.'); return; }
+  var provider = new firebase.auth.GoogleAuthProvider();
+  firebase.auth().signInWithPopup(provider).then(function(result) {
+    applyLinkedUser(result.user);
+  }).catch(function(e) {
+    console.warn('Google sign-in failed:', e);
+    if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+      alert('Google sign-in failed. Try again.');
+    }
+  });
+}
+
+function toggleEmailForm() {
+  var form = $('email-form');
+  if (!form) return;
+  form.style.display = (form.style.display === 'none' || !form.style.display) ? '' : 'none';
+  var st = $('email-form-status'); if (st) st.textContent = '';
+}
+
+function emailSignIn() {
+  if (!db || typeof firebase === 'undefined') { alert('Not available right now.'); return; }
+  var email = ($('email-input') || {}).value || '';
+  var pass = ($('email-password-input') || {}).value || '';
+  var st = $('email-form-status');
+  if (!email || !pass) { if (st) st.textContent = 'Enter an email and password.'; return; }
+  firebase.auth().signInWithEmailAndPassword(email.trim(), pass).then(function(result) {
+    if (st) st.textContent = '';
+    toggleEmailForm();
+    applyLinkedUser(result.user);
+  }).catch(function(e) {
+    if (st) st.textContent = e.message || 'Sign in failed.';
+  });
+}
+
+function emailSignUp() {
+  if (!db || typeof firebase === 'undefined') { alert('Not available right now.'); return; }
+  var email = ($('email-input') || {}).value || '';
+  var pass = ($('email-password-input') || {}).value || '';
+  var st = $('email-form-status');
+  if (!email || !pass) { if (st) st.textContent = 'Enter an email and password.'; return; }
+  if (pass.length < 6) { if (st) st.textContent = 'Password needs at least 6 characters.'; return; }
+  firebase.auth().createUserWithEmailAndPassword(email.trim(), pass).then(function(result) {
+    if (st) st.textContent = '';
+    toggleEmailForm();
+    applyLinkedUser(result.user);
+  }).catch(function(e) {
+    if (st) st.textContent = e.message || 'Could not create account.';
+  });
+}
+
+function signOutGoogle() {
+  if (!confirm('Sign out? You\'ll go back to a local guest account on this browser.')) return;
+  firebase.auth().signOut().then(function() {
+    isGoogleLinked = false;
+    localStorage.removeItem('cr-google-uid');
+    // Fall back to a fresh local guest identity
+    myUserId = localStorage.getItem('cr-userId-guest') || ('u_' + Math.random().toString(36).substr(2, 10));
+    localStorage.setItem('cr-userId-guest', myUserId);
+    localStorage.setItem('cr-userId', myUserId);
+    myUsername = '';
+    localStorage.removeItem('cr-username');
+    updateGoogleButtons();
+    promptUsername();
+    firebase.auth().signInAnonymously().catch(function() {});
+  });
+}
+
+function updateGoogleButtons() {
+  setDisplay('google-signin-btn', isGoogleLinked ? 'none' : '');
+  setDisplay('email-signin-btn', isGoogleLinked ? 'none' : '');
+  setDisplay('google-signout-btn', isGoogleLinked ? '' : 'none');
+  if (isGoogleLinked) setDisplay('email-form', 'none');
+}
+
+// A username, chat, and online play all require a linked real account
+// (Google or email) — this is the single gate every one of those entry
+// points checks first.
+function requireGoogleSignIn(actionLabel) {
+  if (isGoogleLinked) return true;
+  if (confirm('Sign in to ' + actionLabel + '.\n\nClick OK to sign in with Google — or use the ✉️ Email button for any email address, including Outlook.')) {
+    signInWithGoogle();
+  }
+  return false;
+}
+
+function goOnlinePanel(id) {
+  if (!requireGoogleSignIn('play online')) return;
+  showOLPanel(id);
+}
+
+function accountPrefixFor(user) {
+  if (user.providerData && user.providerData.length) {
+    var pid = user.providerData[0].providerId;
+    if (pid === 'google.com') return 'g_';
+    if (pid === 'password') return 'e_';
+  }
+  return 'u_';
+}
+
+function applyLinkedUser(user) {
+  if (!user) return;
+  isGoogleLinked = true;
+  myUserId = accountPrefixFor(user) + user.uid;
+  localStorage.setItem('cr-google-uid', myUserId);
+  localStorage.setItem('cr-userId', myUserId);
+  updateGoogleButtons();
+  checkBlockStatus(); // re-check now that myUserId points at the real account
+  // Look up whether this account already has a username on file
+  db.ref('users/' + myUserId + '/username').once('value', function(snap) {
+    if (snap.exists() && snap.val()) {
+      myUsername = snap.val();
+      localStorage.setItem('cr-username', myUsername);
+      showUsername(myUsername);
+      updateChatUsernameNotice();
+      loadChat();
+      tryAutoRejoinActiveRoom();
+    } else {
+      // First time linking this account — ask them to pick a username tied to it
+      promptUsername();
+      var inp = $('uname-input');
+      if (inp && user.displayName) inp.value = user.displayName.replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 16);
+    }
+  });
+}
+
+// Restore a previous session automatically on reload (Google or email)
+if (db && typeof firebase !== 'undefined') {
+  firebase.auth().onAuthStateChanged(function(user) {
+    if (user && !user.isAnonymous) {
+      applyLinkedUser(user);
+    }
+  });
+}
+
 // ======== USERNAME SYSTEM ========
 var myUserId = localStorage.getItem('cr-userId') || ('u_' + Math.random().toString(36).substr(2, 10));
 localStorage.setItem('cr-userId', myUserId);
@@ -3639,16 +3798,21 @@ var usernameEditing = false;
 var lastUsernameChange = 0;
 var USERNAME_COOLDOWN = 30000; // 30 seconds between changes
 
-// ======== BLOCK LIST (admin can block a device's 10-digit code) ========
+// ======== BLOCK LIST (admin can block a device's secret code, or a linked account) ========
 var amBlocked = false;
 var blockStatusChecked = false;
 var blockStatusPromise = null;
 function checkBlockStatus() {
   if (!db) { blockStatusChecked = true; return Promise.resolve(); }
-  blockStatusPromise = db.ref('banned/' + mySecretCode).once('value').then(function(snap) {
-    if (snap.exists()) {
-      amBlocked = true;
-      showBlockedNotice(snap.val());
+  var lookups = [db.ref('banned/' + mySecretCode).once('value')];
+  if (myUserId) lookups.push(db.ref('banned/' + myUserId).once('value'));
+  blockStatusPromise = Promise.all(lookups).then(function(snaps) {
+    for (var i = 0; i < snaps.length; i++) {
+      if (snaps[i].exists()) {
+        amBlocked = true;
+        showBlockedNotice(snaps[i].val());
+        break;
+      }
     }
     blockStatusChecked = true;
   }).catch(function() {
@@ -3773,46 +3937,20 @@ function setUsername() {
   var inp = document.getElementById('uname-input');
   var name = inp.value.trim();
   if (!name || name.length < 1) return;
+  if (!requireGoogleSignIn('set a username')) return;
   if (!db) { localStorage.setItem('cr-prev-username', myUsername); myUsername = name; localStorage.setItem('cr-username', myUsername); showUsername(myUsername); updateChatUsernameNotice(); loadChat(); prefillNames(); return; }
-  
-  // Check if this fingerprint already has an account with a different userId
-  db.ref('fingerprints/' + browserFingerprint).once('value', function(fpSnap) {
-    var existingUserId = fpSnap.exists() ? fpSnap.val().userId : null;
-    if (existingUserId && existingUserId !== myUserId) {
-      // This device already has an account — adopt it
-      var oldId = myUserId;
-      myUserId = existingUserId;
-      localStorage.setItem('cr-userId', myUserId);
-      // Load existing username
-      db.ref('users/' + myUserId + '/username').once('value', function(uSnap) {
-        if (uSnap.exists() && uSnap.val()) {
-          myUsername = uSnap.val();
-          localStorage.setItem('cr-username', myUsername);
-          showUsername(myUsername);
-          updateChatUsernameNotice();
-          loadChat();
-          // Re-sync this account's stored secret/fingerprint/lastSeen to THIS
-          // device's live values. Without this, an adopted account keeps
-          // whatever secret code it had from wherever it was first created —
-          // which drifts from the browser's current cr-secret the moment
-          // storage was ever cleared (the very thing that triggers this
-          // adoption path) — and any block against the old code then silently
-          // stops matching forever.
-          registerUsername(myUsername);
-          alert('Welcome back! Your account "' + myUsername + '" was restored.');
-          return;
-        }
-        // No username on existing account, proceed normally
-        doSetUsername(name);
-      }, function() { doSetUsername(name); });
-      return;
-    }
-    doSetUsername(name);
-  }, function() {
-    // Couldn't read /fingerprints (e.g. permission denied) — don't let that block
-    // setting a username, just proceed as if this is a fresh device.
-    doSetUsername(name);
-  });
+  // NOTE: this used to look up /fingerprints/{browserFingerprint} and, if it
+  // matched an existing account, silently switch this browser over to that
+  // account ("Welcome back!"). Removed: browsers with anti-fingerprinting
+  // protection (Brave in particular, also Firefox's resistFingerprinting and
+  // Safari ITP) deliberately normalize screen size, timezone, and other
+  // signals so many unrelated visitors compute the exact same fingerprint —
+  // which meant a brand-new person could get silently logged into a
+  // complete stranger's account. localStorage (cr-userId) is what correctly
+  // identifies a returning visit on THIS browser profile; the fingerprint is
+  // still recorded server-side for anti-abuse review, just never used to
+  // auto-switch identity.
+  doSetUsername(name);
 }
 
 function doSetUsername(name) {
@@ -3950,11 +4088,15 @@ function initChat() {
 
 function updateChatUsernameNotice() {
   var notice = $('chat-username-notice');
-  if (notice) notice.style.display = myUsername ? 'none' : '';
+  var unlocked = myUsername && isGoogleLinked;
+  if (notice) {
+    notice.style.display = unlocked ? 'none' : '';
+    notice.textContent = isGoogleLinked ? 'Set a username (top right) to send messages' : 'Sign in with Google (top right) to chat';
+  }
   var inp = $('chat-input');
   if (inp) {
-    inp.disabled = !myUsername;
-    inp.placeholder = myUsername ? 'Type a message…' : 'Set a username first';
+    inp.disabled = !unlocked;
+    inp.placeholder = unlocked ? 'Type a message…' : (isGoogleLinked ? 'Set a username first' : 'Sign in with Google first');
   }
 }
 
@@ -3996,7 +4138,7 @@ function attachChatListener() {
   container.innerHTML = '<div style="font-size:11px;color:#ccc;text-align:center;padding:1rem;">Loading…</div>';
   var ref = getChatRef();
   if (!ref) return;
-  var query = ref.orderByChild('timestamp').limitToLast(100);
+  var query = ref.orderByChild('timestamp').limitToLast(250);
   activeChatRef = query;
   activeChatHandler = query.on('value', function(snap) {
     var c = $('chat-messages');
@@ -4039,6 +4181,7 @@ function sendChat() {
   var inp = $('chat-input');
   if (!inp) return;
   var text = inp.value.trim();
+  if (!isGoogleLinked) { updateChatUsernameNotice(); return; }
   if (!myUsername) { updateChatUsernameNotice(); return; }
   if (!text) return;
   var ref = getChatRef();
@@ -4059,9 +4202,9 @@ function sendChat() {
   ref.orderByChild('timestamp').once('value', function(snap) {
     var keys = [];
     snap.forEach(function(child) { keys.push(child.key); });
-    if (keys.length > 100) {
+    if (keys.length > 250) {
       var updates = {};
-      for (var i = 0; i < keys.length - 100; i++) updates[keys[i]] = null;
+      for (var i = 0; i < keys.length - 250; i++) updates[keys[i]] = null;
       ref.update(updates);
     }
   });
@@ -4178,30 +4321,110 @@ function onHostMigrate(msg) {
   if (typeof updateOLLobby === 'function') updateOLLobby();
 }
 
+// ======== DISCONNECT GRACE PERIOD (host-authoritative) ========
+// Map of slot -> { clientId, deadline, timer } for players who just dropped
+// and are being given 20s to come back before their slot is forfeited.
+var pendingDisconnects = {};
+var DISCONNECT_GRACE_MS = 20000;
+var disconnectTickTimer = null;
+
+function startDisconnectTicker() {
+  if (disconnectTickTimer) return;
+  disconnectTickTimer = setInterval(function() {
+    var any = false;
+    for (var slot in localPendingDisconnects) { any = true; break; }
+    if (!any) { clearInterval(disconnectTickTimer); disconnectTickTimer = null; return; }
+    renderPlayerBar();
+  }, 1000);
+}
+
+function beginDisconnectGrace(slot, cid, name) {
+  if (!isHost) return;
+  if (pendingDisconnects[slot]) return; // already tracking this slot
+  var deadline = Date.now() + DISCONNECT_GRACE_MS;
+  pendingDisconnects[slot] = { clientId: cid, deadline: deadline, timer: null };
+  localPendingDisconnects[slot] = { name: name, deadline: deadline };
+  channel.publish('disconnectwarn', { slot: slot, clientId: cid, name: name, deadline: deadline });
+  pendingDisconnects[slot].timer = setTimeout(function() {
+    resolveDisconnect(slot, false);
+  }, DISCONNECT_GRACE_MS);
+  startDisconnectTicker();
+  renderPlayerBar();
+}
+
+// reconnected: true if the player came back before the deadline
+function resolveDisconnect(slot, reconnected) {
+  if (!isHost) return;
+  var entry = pendingDisconnects[slot];
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  delete pendingDisconnects[slot];
+  delete localPendingDisconnects[slot];
+  if (reconnected) {
+    channel.publish('welcomeback', { clientId: entry.clientId, slot: slot });
+  }
+  // The slot is forfeited either way — someone needs to be controlling it to
+  // keep the game moving, and 20s of silence (or coming back only as a
+  // spectator) both mean that's no longer true.
+  if (alive[slot]) channel.publish('move', { forfeit: true, player: slot });
+  channel.publish('disconnectresolved', { slot: slot });
+  renderPlayerBar();
+}
+
+// ======== ACTIVE ROOM PERSISTENCE (so a browser refresh mid-game can
+// silently rejoin within the disconnect grace period, instead of just
+// getting dropped) ========
+var ACTIVE_ROOM_MAX_AGE_MS = 60000; // only auto-rejoin if the tab closed/refreshed within the last minute
+
+function saveActiveRoomRecord() {
+  try {
+    localStorage.setItem('cr-active-room', JSON.stringify({ code: roomCode, ts: Date.now() }));
+  } catch (e) {}
+}
+
+function clearActiveRoomRecord() {
+  try { localStorage.removeItem('cr-active-room'); } catch (e) {}
+}
+
+function tryAutoRejoinActiveRoom() {
+  var raw;
+  try { raw = localStorage.getItem('cr-active-room'); } catch (e) { return; }
+  if (!raw) return;
+  var rec;
+  try { rec = JSON.parse(raw); } catch (e) { clearActiveRoomRecord(); return; }
+  if (!rec || !rec.code || (Date.now() - rec.ts) > ACTIVE_ROOM_MAX_AGE_MS) { clearActiveRoomRecord(); return; }
+  if (!isGoogleLinked || !myUsername) return; // need an identity before we can rejoin anything
+  var inp = document.getElementById('ol-join-code');
+  if (!inp) return; // page not fully ready yet — don't risk olJoinRoom crashing on a missing element
+  inp.value = rec.code;
+  olJoinRoom();
+}
+
 function onPlayerDisconnect(member) {
   var cid = member.clientId;
-  
-  // Forfeit if game is running
-  if (gameStarted && board) {
+
+  if (isHost && gameStarted && board) {
     for (var i = 0; i < olSlotMapStored.length; i++) {
       if (olSlotMapStored[i].clientId === cid) {
         var slot = olSlotMapStored[i].slot;
-        if (alive[slot]) executeForfeit(slot);
+        if (alive[slot] && !pendingDisconnects[slot]) {
+          beginDisconnectGrace(slot, cid, olSlotMapStored[i].name || 'Player');
+        }
         break;
       }
     }
   }
-  
+
   // Check if they were host — try multiple sources
   var wasHost = false;
   if (member.data && member.data.host) wasHost = true;
   for (var i = 0; i < onlinePlayers.length; i++) {
     if (onlinePlayers[i].clientId === cid && onlinePlayers[i].host) wasHost = true;
   }
-  
+
   // Remove from onlinePlayers
   onlinePlayers = onlinePlayers.filter(function(p) { return p.clientId !== cid; });
-  
+
   if (wasHost) {
     // Determine new host — first remaining member
     channel.presence.get(function(err, members) {
@@ -4213,11 +4436,65 @@ function onPlayerDisconnect(member) {
       }
       if (members[0].clientId === myClientId) {
         channel.publish('hostmigrate', { newHostId: myClientId, newHostName: myName });
+        // Inherit responsibility for anyone the old host was already
+        // waiting on — their grace-period timers died with the old host,
+        // so re-check presence and pick the countdowns back up (or resolve
+        // immediately if they've already left too).
+        setTimeout(recoverOrphanedDisconnects, 500);
       }
     });
   }
-  
+
   updateSpectatorList();
+}
+
+// Called by a freshly-promoted host to make sure nobody's stuck mid-forfeit
+// because the previous host disconnected before their grace period ended.
+function recoverOrphanedDisconnects() {
+  if (!isHost || !gameStarted || !board) return;
+  channel.presence.get(function(err, members) {
+    if (err) return;
+    var presentIds = {};
+    for (var i = 0; i < members.length; i++) presentIds[members[i].clientId] = true;
+    for (var s = 0; s < NUM_PLAYERS; s++) {
+      if (!alive[s] || isAIPlayer[s]) continue;
+      var entry = null;
+      for (var i = 0; i < olSlotMapStored.length; i++) if (olSlotMapStored[i].slot === s) entry = olSlotMapStored[i];
+      if (!entry) continue;
+      if (!presentIds[entry.clientId] && !pendingDisconnects[s]) {
+        beginDisconnectGrace(s, entry.clientId, entry.name || 'Player');
+      }
+    }
+  });
+}
+
+var localPendingDisconnects = {}; // every client's own copy for rendering the countdown badge, keyed by slot
+
+function onDisconnectWarn(msg) {
+  var d = msg.data;
+  localPendingDisconnects[d.slot] = { name: d.name, deadline: d.deadline };
+  startDisconnectTicker();
+  renderPlayerBar();
+}
+
+function onDisconnectResolved(msg) {
+  var d = msg.data;
+  delete localPendingDisconnects[d.slot];
+  renderPlayerBar();
+}
+
+function onWelcomeBack(msg) {
+  var d = msg.data;
+  if (d.clientId !== myClientId) return;
+  // This is ME reconnecting after a drop — I come back as a spectator, not
+  // resuming my old slot (it's being forfeited regardless, to keep the game
+  // moving for everyone else while I was gone).
+  isSpectator = true;
+  mySlot = -1;
+  wantsToPlay = true;
+  gameMode = 'online';
+  if (channel) channel.presence.update({ name: myName, host: isHost, spectator: true, wantsToPlay: true });
+  updateSpectatorUI();
 }
 
 function kickPlayer(targetClientId, targetName) {
@@ -4234,6 +4511,7 @@ var olSlotMapStored = []; // stored from start message for disconnect lookup
 // Override olJoinRoom to handle late joins
 var _origOlJoinRoom = olJoinRoom;
 olJoinRoom = function() {
+  if (!requireGoogleSignIn('join a room')) return;
   if (!myUsername) { var n = document.getElementById('ol-join-nouser'); if (n) n.style.display = ''; return; }
   myName = myUsername; isHost = false; isSpectator = false;
   roomCode = (document.getElementById('ol-join-code').value || '').trim().toUpperCase();
@@ -4259,6 +4537,10 @@ olJoinRoom = function() {
     });
     channel.subscribe('hostmigrate', onHostMigrate);
     channel.subscribe('endtournament', function() { endTournament(); });
+    channel.subscribe('slotconvert', onSlotConvert);
+    channel.subscribe('disconnectwarn', onDisconnectWarn);
+    channel.subscribe('disconnectresolved', onDisconnectResolved);
+    channel.subscribe('welcomeback', onWelcomeBack);
     channel.subscribe('kick', function(msg) {
       if (msg.data && msg.data.targetId === myClientId) {
         alert('You have been kicked from the room.');
@@ -4274,10 +4556,10 @@ olJoinRoom = function() {
     // Request game state in case game is already running
     setTimeout(function() {
       if (channel && channel.state === 'attached') {
-        channel.publish('requestsync', {});
+        channel.publish('requestsync', { name: myUsername });
       } else if (channel) {
         channel.once('attached', function() {
-          channel.publish('requestsync', {});
+          channel.publish('requestsync', { name: myUsername });
         });
       }
     }, 1500);
@@ -4287,6 +4569,7 @@ olJoinRoom = function() {
 // When host creates room, also subscribe to sync
 var _origOlCreateRoom = olCreateRoom;
 olCreateRoom = function() {
+  if (!requireGoogleSignIn('create a room')) return;
   if (!myUsername) { var n = document.getElementById('ol-create-nouser'); if (n) n.style.display = ''; return; }
   myName = myUsername; isHost = true; roomCode = genCode();
   if (olHumans + olAIs < 2) olAIs = Math.max(1, olAIs);
@@ -4301,19 +4584,45 @@ olCreateRoom = function() {
     channel.subscribe('move', onOLMove);
     channel.subscribe('newgame', onOLNewGame);
     channel.subscribe('sync', onSyncReceived);
-    channel.subscribe('requestsync', function() {
+    channel.subscribe('requestsync', function(msg) {
       if (isHost && gameStarted && board) {
-        channel.publish('sync', {
+        var payload = {
           board: board, turn: turn, placed: placed, alive: alive,
           size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, numHumans: NUM_HUMANS,
           colorMap: colorMap, playerNames: playerNames,
           roundNum: roundNum, elimOrder: elimOrder, elimInfo: elimInfo, killCounts: killCounts,
           matchOrder: matchOrder, turnQueue: turnQueue.slice(), currentRoundOrder: currentRoundOrder,
+          tournamentActive: tournamentActive, tournamentScores: tournamentScores, tournamentRound: tournamentRound,
+          slotMap: olSlotMapStored,
           gameStarted: true
-        });
+        };
+        // If round 0 (initial placement) isn't finished yet, let the joiner
+        // take over an AI slot that hasn't placed its first square instead
+        // of just spectating.
+        if (!allPlaced()) {
+          for (var s = 0; s < NUM_PLAYERS; s++) {
+            if (isAIPlayer[s] && !placed[s]) {
+              var joinerName = (msg.data && msg.data.name) || 'Player';
+              isAIPlayer[s] = false;
+              playerNames[s] = joinerName;
+              olSlotMapStored.push({ clientId: msg.clientId, name: joinerName, slot: s });
+              renderPlayerBar();
+              payload.assignedSlot = s;
+              payload.assignedClientId = msg.clientId;
+              payload.assignedName = joinerName;
+              payload.playerNames = playerNames; // updated copy including the new name
+              channel.publish('slotconvert', { slot: s, clientId: msg.clientId, name: joinerName });
+              break;
+            }
+          }
+        }
+        channel.publish('sync', payload);
       }
     });
     channel.subscribe('hostmigrate', onHostMigrate);
+    channel.subscribe('disconnectwarn', onDisconnectWarn);
+    channel.subscribe('disconnectresolved', onDisconnectResolved);
+    channel.subscribe('welcomeback', onWelcomeBack);
     channel.subscribe('kick', function(msg) {
       if (msg.data && msg.data.targetId === myClientId) {
         alert('You have been kicked from the room.');
@@ -4335,14 +4644,15 @@ function onSyncReceived(msg) {
   if (gameStarted && !isSpectator) return;
   var d = msg.data;
   if (!d.gameStarted) return;
-  isSpectator = true;
+  var gotSlot = (d.assignedSlot !== undefined && d.assignedClientId === myClientId);
+  isSpectator = !gotSlot;
   wantsToPlay = true; // default to wanting to play next game
   gameStarted = true;
   gameMode = 'online';
-  if (channel) channel.presence.update({ name: myName, host: false, spectator: true, wantsToPlay: true });
   SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs; NUM_HUMANS = d.numHumans;
   board = d.board; turn = d.turn; placed = d.placed; alive = d.alive;
-  if (d.colorMap) colorMap = d.colorMap.slice(); playerNames = d.playerNames;
+  if (d.colorMap) colorMap = d.colorMap.slice();
+  playerNames = d.playerNames ? d.playerNames.slice() : [];
   roundNum = d.roundNum; elimOrder = d.elimOrder || []; elimInfo = d.elimInfo || {};
   killCounts = d.killCounts || [];
   // Rebuild isAIPlayer from names
@@ -4353,17 +4663,39 @@ function onSyncReceived(msg) {
   if (d.matchOrder) matchOrder = d.matchOrder;
   if (d.turnQueue) turnQueue = d.turnQueue;
   if (d.currentRoundOrder) currentRoundOrder = d.currentRoundOrder;
-  mySlot = -1;
+  tournamentActive = !!d.tournamentActive;
+  tournamentScores = d.tournamentScores || {};
+  tournamentRound = d.tournamentRound || 0;
+  if (d.slotMap) olSlotMapStored = d.slotMap.slice();
+  else if (!olSlotMapStored) olSlotMapStored = [];
+
+  if (gotSlot) {
+    mySlot = d.assignedSlot;
+    isAIPlayer[mySlot] = false;
+    playerNames[mySlot] = myName;
+    olSlotMapStored.push({ clientId: myClientId, name: myName, slot: mySlot });
+    if (channel) channel.presence.update({ name: myName, host: false, spectator: false });
+  } else {
+    mySlot = -1;
+    if (channel) channel.presence.update({ name: myName, host: false, spectator: true, wantsToPlay: true });
+  }
+
   wins = []; for (var i = 0; i < COLORS.length; i++) wins.push(0);
   hideOLPanels();
   setDisplay('main-menu', 'none');
   setDisplay('local-screen', '');
   setDisplay('local-settings', 'none');
   setDisplay('online-info', '');
-  document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectating</span> ' +
-    '<button class="btn" onclick="toggleWantsToPlay()" style="padding:6px 16px;font-size:13px;font-weight:700;border-radius:10px;">' + (wantsToPlay ? '✅ Joining next game' : '👁 Staying as spectator') + '</button> ' +
-    '<button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+  if (gotSlot) {
+    document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; You are <strong>' + PN(mySlot) + '</strong> &nbsp; <button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+  } else {
+    document.getElementById('online-info').innerHTML = 'Room: <strong>' + roomCode + '</strong> &bull; <span class="spectator-badge">Spectating</span> ' +
+      '<button class="btn" onclick="toggleWantsToPlay()" style="padding:6px 16px;font-size:13px;font-weight:700;border-radius:10px;">' + (wantsToPlay ? '✅ Joining next game' : '👁 Staying as spectator') + '</button> ' +
+      '<button class="btn" onclick="olLeave()" style="padding:3px 10px;font-size:10px;">Leave</button>';
+  }
   applyCellSize(); renderGrid(); renderPlayerBar(); renderSideLB(); updateUI();
+  updateBlockedSquares();
+  updateTournamentBar();
 }
 
 // When a late joiner connects and game is already running, request sync
@@ -4415,6 +4747,16 @@ updateOLLobby = function() {
       document.getElementById('ol-lob-info').textContent = onlinePlayers.length + ' players in room';
     }
     if (gameStarted) updateSpectatorList();
+    // Host: check if anyone we're waiting on for a disconnect grace period has come back
+    if (isHost) {
+      var presentIds = {};
+      for (var i = 0; i < members.length; i++) presentIds[members[i].clientId] = true;
+      for (var slot in pendingDisconnects) {
+        if (presentIds[pendingDisconnects[slot].clientId]) {
+          resolveDisconnect(parseInt(slot, 10), true);
+        }
+      }
+    }
   });
 };
 
@@ -4600,14 +4942,14 @@ function loadMainPublicRooms() {
         '<div class="mpr-code">' + d.roomCode + '</div>';
       (function(code) {
         row.onclick = function() {
-          if (myUsername) {
+          if (myUsername && isGoogleLinked) {
             var inp = document.getElementById('ol-join-code');
             if (inp) inp.value = code;
             olJoinRoom();
           } else {
             var inp = document.getElementById('ol-join-code');
             if (inp) inp.value = code;
-            showOLPanel('ol-join');
+            goOnlinePanel('ol-join');
           }
         };
       })(d.roomCode);
@@ -4649,8 +4991,8 @@ function loadMainPublicRooms() {
   <div class="ol-card">
     <h2>Online game</h2>
     <div style="margin-top:0.3rem;">
-      <button class="mbtn primary" onclick="showOLPanel('ol-create')">Create room</button>
-      <button class="mbtn secondary" onclick="showOLPanel('ol-join')">Join room</button>
+      <button class="mbtn primary" onclick="goOnlinePanel('ol-create')">Create room</button>
+      <button class="mbtn secondary" onclick="goOnlinePanel('ol-join')">Join room</button>
       <button class="mbtn secondary" onclick="hideOLPanels()">Cancel</button>
     </div>
   </div>
@@ -4762,6 +5104,19 @@ function loadMainPublicRooms() {
   <span class="uname-display" id="uname-display"></span>
   <input type="text" id="uname-input" placeholder="Enter username" maxlength="16">
   <button class="set-btn" id="uname-btn" onclick="toggleUsernameEdit()">Set username</button>
+  <button class="set-btn" id="google-signin-btn" onclick="signInWithGoogle()" style="background:rgba(255,255,255,0.35);" title="Link a Google account so you keep your account even after clearing browser data, and so it can't be duplicated">🔑 Google</button>
+  <button class="set-btn" id="email-signin-btn" onclick="toggleEmailForm()" style="background:rgba(255,255,255,0.35);" title="Sign in with any email address — Outlook, Gmail, etc.">✉️ Email</button>
+  <button class="set-btn" id="google-signout-btn" onclick="signOutGoogle()" style="display:none;background:rgba(255,255,255,0.2);">Sign out</button>
+
+  <div id="email-form" style="display:none;position:absolute;top:100%;right:0;margin-top:6px;background:var(--ui-bg);color:var(--text-dark);border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,0.25);width:220px;">
+    <input type="email" id="email-input" placeholder="you@outlook.com" style="width:100%;padding:6px 8px;margin-bottom:6px;border:1px solid #ddd;border-radius:8px;font-size:13px;color:var(--text-dark);">
+    <input type="password" id="email-password-input" placeholder="Password (min 6 chars)" style="width:100%;padding:6px 8px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;font-size:13px;color:var(--text-dark);">
+    <div style="display:flex;gap:6px;">
+      <button class="mbtn primary" style="flex:1;font-size:12px;padding:6px;" onclick="emailSignIn()">Sign in</button>
+      <button class="mbtn secondary" style="flex:1;font-size:12px;padding:6px;" onclick="emailSignUp()">Create account</button>
+    </div>
+    <div id="email-form-status" style="font-size:11px;color:#e55;margin-top:6px;"></div>
+  </div>
 </div>
 
 <!-- CHAT -->
