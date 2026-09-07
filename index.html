@@ -3765,6 +3765,11 @@ function applyLinkedUser(user) {
       var inp = $('uname-input');
       if (inp && user.displayName) inp.value = user.displayName.replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 16);
     }
+  }, function(err) {
+    console.error('Could not read account username:', err);
+    alert('Signed in, but could not load your account (database error: ' + (err && err.code ? err.code : err.message || err) + '). Your database rules may be blocking reads on /users — check the Firebase console.');
+    // Still let them try to set a username even though the lookup failed
+    promptUsername();
   });
 }
 
@@ -4008,6 +4013,9 @@ function doSetUsername(name) {
     }).catch(function(err) {
       alert('Could not set username: ' + err.message);
     });
+  }, function(err) {
+    console.error('Username uniqueness check failed:', err);
+    alert('Could not check username availability (database error: ' + (err && err.code ? err.code : (err && err.message) || err) + '). Your database rules may be blocking reads on /usernames — check the Firebase console.');
   });
 }
 
