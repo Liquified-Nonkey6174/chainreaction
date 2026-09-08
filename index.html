@@ -3685,7 +3685,12 @@ function emailSignUp() {
   firebase.auth().createUserWithEmailAndPassword(email.trim(), pass).then(function(result) {
     if (st) st.textContent = '';
     toggleEmailForm();
-    result.user.sendEmailVerification().catch(function() {});
+    result.user.sendEmailVerification().then(function() {
+      alert('Account created! A verification email was just sent to ' + result.user.email + ' — check your inbox (and spam folder).');
+    }).catch(function(sendErr) {
+      console.error('sendEmailVerification failed:', sendErr);
+      alert('Account created, but the verification email failed to send (' + (sendErr && sendErr.code ? sendErr.code : sendErr.message || sendErr) + '). Use the "Resend" button (top right) to try again.');
+    });
     applyLinkedUser(result.user);
   }).catch(function(e) {
     if (st) st.textContent = e.message || 'Could not create account.';
