@@ -3641,6 +3641,7 @@ if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
 // ======== ACCOUNT SIGN-IN (email/password — free, ties one real account to
 // one username) ========
 var isGoogleLinked = false; // true whenever a real (non-anonymous) email account is linked — name kept for minimal diff, no Google involved anymore
+var isEmailVerified = false;
 
 function toggleEmailForm() {
   var form = $('email-form');
@@ -3658,7 +3659,9 @@ function emailSignIn() {
   firebase.auth().signInWithEmailAndPassword(email.trim(), pass).then(function(result) {
     if (st) st.textContent = '';
     toggleEmailForm();
-    applyLinkedUser(result.user);
+    // Make sure emailVerified reflects the LATEST state (they may have
+    // clicked the verify link in another tab since this session started)
+    result.user.reload().then(function() { applyLinkedUser(firebase.auth().currentUser); });
   }).catch(function(e) {
     if (st) st.textContent = e.message || 'Sign in failed.';
   });
@@ -3674,9 +3677,31 @@ function emailSignUp() {
   firebase.auth().createUserWithEmailAndPassword(email.trim(), pass).then(function(result) {
     if (st) st.textContent = '';
     toggleEmailForm();
+    result.user.sendEmailVerification().catch(function() {});
     applyLinkedUser(result.user);
   }).catch(function(e) {
     if (st) st.textContent = e.message || 'Could not create account.';
+  });
+}
+
+function resendVerificationEmail() {
+  var user = firebase.auth().currentUser;
+  if (!user) return;
+  user.sendEmailVerification().then(function() {
+    alert('Verification email sent to ' + user.email + '. Check your inbox (and spam folder).');
+  }).catch(function(e) {
+    alert('Could not send verification email: ' + e.message);
+  });
+}
+
+function recheckEmailVerified() {
+  var user = firebase.auth().currentUser;
+  if (!user) return;
+  user.reload().then(function() {
+    applyLinkedUser(firebase.auth().currentUser);
+    if (!firebase.auth().currentUser.emailVerified) {
+      alert('Still not verified — click the link in the email first, then try again.');
+    }
   });
 }
 
@@ -3684,6 +3709,7 @@ function signOutGoogle() {
   if (!confirm('Sign out? You\'ll go back to a local guest account on this browser.')) return;
   firebase.auth().signOut().then(function() {
     isGoogleLinked = false;
+    isEmailVerified = false;
     localStorage.removeItem('cr-google-uid');
     // Fall back to a fresh local guest identity
     myUserId = localStorage.getItem('cr-userId-guest') || ('u_' + Math.random().toString(36).substr(2, 10));
@@ -3692,6 +3718,8 @@ function signOutGoogle() {
     myUsername = '';
     localStorage.removeItem('cr-username');
     updateGoogleButtons();
+    updateVerifyBanner();
+    updateChatUsernameNotice();
     promptUsername();
     firebase.auth().signInAnonymously().catch(function() {});
   });
@@ -3703,11 +3731,19 @@ function updateGoogleButtons() {
   if (isGoogleLinked) setDisplay('email-form', 'none');
 }
 
+function updateVerifyBanner() {
+  setDisplay('verify-banner', (isGoogleLinked && !isEmailVerified) ? '' : 'none');
+}
+
 // A username, chat, and online play all require a linked real (email)
 // account — this is the single gate every one of those entry points checks
 // first.
 function requireGoogleSignIn(actionLabel) {
-  if (isGoogleLinked) return true;
+  if (isGoogleLinked && isEmailVerified) return true;
+  if (isGoogleLinked && !isEmailVerified) {
+    alert('Verify your email first to ' + actionLabel + '.\n\nCheck your inbox for the verification link, then click "I\'ve verified" (top right).');
+    return false;
+  }
   alert('Sign in to ' + actionLabel + '.\n\nClick the ✉️ Sign in button (top right) with any email address.');
   var form = $('email-form');
   if (form) form.style.display = '';
@@ -3731,10 +3767,13 @@ function accountPrefixFor(user) {
 function applyLinkedUser(user) {
   if (!user) return;
   isGoogleLinked = true;
+  isEmailVerified = !!user.emailVerified;
   myUserId = accountPrefixFor(user) + user.uid;
   localStorage.setItem('cr-google-uid', myUserId);
   localStorage.setItem('cr-userId', myUserId);
   updateGoogleButtons();
+  updateVerifyBanner();
+  updateChatUsernameNotice();
   checkBlockStatus(); // re-check now that myUserId points at the real account
   // Look up whether this account already has a username on file
   db.ref('users/' + myUserId + '/username').once('value', function(snap) {
@@ -4082,15 +4121,18 @@ function initChat() {
 
 function updateChatUsernameNotice() {
   var notice = $('chat-username-notice');
-  var unlocked = myUsername && isGoogleLinked;
+  var unlocked = myUsername && isGoogleLinked && isEmailVerified;
+  var reason = !isGoogleLinked ? 'Sign in (top right) to chat'
+    : !isEmailVerified ? 'Verify your email (top right) to chat'
+    : 'Set a username (top right) to send messages';
   if (notice) {
     notice.style.display = unlocked ? 'none' : '';
-    notice.textContent = isGoogleLinked ? 'Set a username (top right) to send messages' : 'Sign in (top right) to chat';
+    notice.textContent = reason;
   }
   var inp = $('chat-input');
   if (inp) {
     inp.disabled = !unlocked;
-    inp.placeholder = unlocked ? 'Type a message…' : (isGoogleLinked ? 'Set a username first' : 'Sign in first');
+    inp.placeholder = unlocked ? 'Type a message…' : (!isGoogleLinked ? 'Sign in first' : !isEmailVerified ? 'Verify your email first' : 'Set a username first');
   }
 }
 
@@ -4176,6 +4218,7 @@ function sendChat() {
   if (!inp) return;
   var text = inp.value.trim();
   if (!isGoogleLinked) { updateChatUsernameNotice(); return; }
+  if (!isEmailVerified) { updateChatUsernameNotice(); return; }
   if (!myUsername) { updateChatUsernameNotice(); return; }
   if (!text) return;
   var ref = getChatRef();
@@ -5109,6 +5152,14 @@ function loadMainPublicRooms() {
       <button class="mbtn secondary" style="flex:1;font-size:12px;padding:6px;" onclick="emailSignUp()">Create account</button>
     </div>
     <div id="email-form-status" style="font-size:11px;color:#e55;margin-top:6px;"></div>
+  </div>
+</div>
+
+<div id="verify-banner" style="display:none;position:fixed;top:56px;right:12px;z-index:39;background:#fff3cd;color:#6b3a2a;border-radius:12px;padding:10px 14px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,0.15);max-width:260px;text-align:right;">
+  ✉️ Check your email to verify your account before you can chat or play online.
+  <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end;">
+    <button class="btn" style="padding:4px 10px;font-size:11px;" onclick="resendVerificationEmail()">Resend</button>
+    <button class="btn" style="padding:4px 10px;font-size:11px;" onclick="recheckEmailVerified()">I've verified</button>
   </div>
 </div>
 
