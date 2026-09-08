@@ -3634,8 +3634,16 @@ if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
     appId: "1:1013659619628:web:3100ed4eda5164e5159c89"
   });
   db = firebase.database();
-  // Sign in anonymously so database rules can verify auth
-  firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
+  // NOTE: this used to call firebase.auth().signInAnonymously() unconditionally
+  // right here. That was a race: Firebase restores a PERSISTED real session
+  // (from a previous email sign-in) asynchronously, but this call fired
+  // immediately and synchronously started a brand new anonymous session —
+  // whichever one "won" became the current user. Sometimes the real session
+  // lost that race, which looked exactly like getting randomly signed out
+  // (myUsername stayed shown because that's read from localStorage
+  // independently of the actual Firebase auth state). The anonymous fallback
+  // now only runs from inside onAuthStateChanged below, and only when
+  // there's truly no session of any kind to restore.
 }
 
 // ======== ACCOUNT SIGN-IN (email/password — free, ties one real account to
@@ -3798,12 +3806,16 @@ function applyLinkedUser(user) {
   });
 }
 
-// Restore a previous session automatically on reload (Google or email)
+// Restore a previous session automatically on reload (email), or fall back
+// to an anonymous session only if there's no session at all yet.
 if (db && typeof firebase !== 'undefined') {
   firebase.auth().onAuthStateChanged(function(user) {
     if (user && !user.isAnonymous) {
       applyLinkedUser(user);
+    } else if (!user) {
+      firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
     }
+    // else: user exists and is already anonymous — leave it alone
   });
 }
 
