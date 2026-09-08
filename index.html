@@ -183,11 +183,13 @@
   .ol-panel {
     position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 50;
     display: flex; align-items: center; justify-content: center; backdrop-filter: blur(3px);
+    overflow-y: auto; padding: 2rem 1rem;
   }
   .ol-card {
     background: var(--ui-bg); color: var(--text-dark); border-radius: 20px;
     padding: 1.8rem 2.2rem; max-width: 400px; width: 90%;
     box-shadow: 0 12px 40px rgba(0,0,0,0.2); text-align: center;
+    max-height: 85vh; overflow-y: auto; margin: auto;
   }
   .ol-card h2 { font-size: 1.05rem; margin-bottom: 0.8rem; font-weight: 700; }
   .ol-card input {
@@ -1688,8 +1690,9 @@ function renderPlayerBar() {
     top.appendChild(document.createTextNode(txt));
     tag.appendChild(top);
 
-    // Badges (placement, ELIMINATED, win star) get their own centered row so
-    // they never pull the pip+name row off-center for tags that have them.
+    // Badges (placement, win star) get their own centered row so they never
+    // pull the pip+name row off-center for tags that have them. ELIMINATED
+    // only shows on the kill leaderboard, not up here.
     var badges = document.createElement('div');
     badges.className = 'tag-badges';
     if (!alive[i]) {
@@ -1699,12 +1702,6 @@ function renderPlayerBar() {
         plc.style.cssText = 'font-size:9px;opacity:0.6;';
         plc.textContent = '#' + (NUM_PLAYERS - place);
         badges.appendChild(plc);
-      }
-      if (killCounts[i] > 0 && !(elimInfo[i] && elimInfo[i].isWinner)) {
-        var elimBadge = document.createElement('span');
-        elimBadge.style.cssText = 'font-size:9px;font-weight:800;color:#fff;background:#e04040;padding:1px 5px;border-radius:6px;letter-spacing:0.02em;';
-        elimBadge.textContent = 'ELIMINATED';
-        badges.appendChild(elimBadge);
       }
     }
     if (wins[i] > 0) {
@@ -3812,15 +3809,53 @@ function applyLinkedUser(user) {
 }
 
 // Restore a previous session automatically on reload (email), or fall back
-// to an anonymous session only if there's no session at all yet.
+// to an anonymous session only if there's genuinely no session anywhere.
+//
+// Two separate bugs lived here before:
+//  1. This tab's own signInAnonymously() call could race a real session
+//     that was still being restored, and sometimes won that race.
+//  2. Auth state is shared across every open tab on the same site (via
+//     IndexedDB) — so a completely different, freshly-opened tab correctly
+//     falling back to anonymous would fire onAuthStateChanged in THIS tab
+//     too, silently swapping an already-signed-in tab over to that other
+//     tab's anonymous session. That's the "keeps signing me out" bug: it
+//     didn't need this tab to do anything wrong at all.
+//
+// Fix: once we know we're linked, ignore any event that tries to demote us
+// back to anonymous — only an explicit Sign Out call is allowed to do that.
+// And before ever falling back to anonymous ourselves, check whether this
+// browser has a known linked account and, if so, give the real restore a
+// couple of seconds to win before giving up on it.
 if (db && typeof firebase !== 'undefined') {
+  var authSettled = false;
   firebase.auth().onAuthStateChanged(function(user) {
     if (user && !user.isAnonymous) {
+      authSettled = true;
       applyLinkedUser(user);
-    } else if (!user) {
-      firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
+      return;
     }
-    // else: user exists and is already anonymous — leave it alone
+    if (isGoogleLinked) {
+      // We already have a real session in THIS tab's JS state. This event
+      // firing with no/anonymous user is almost certainly a side-effect of
+      // another tab, not a real sign-out — ignore it.
+      return;
+    }
+    if (!user) {
+      var knownLinkedAccount = localStorage.getItem('cr-google-uid');
+      if (knownLinkedAccount && !authSettled) {
+        // This browser should have a real session — give it a moment to
+        // actually restore before assuming there's genuinely nothing there.
+        setTimeout(function() {
+          if (!authSettled && !isGoogleLinked) {
+            firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
+          }
+        }, 2000);
+      } else {
+        authSettled = true;
+        firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
+      }
+    }
+    // else: user exists and is already anonymous, and we're not linked — nothing to do
   });
 }
 
