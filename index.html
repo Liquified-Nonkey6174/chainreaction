@@ -1936,6 +1936,14 @@ function showStartPrompt() {
   startPromptTimeout = setTimeout(function() { el.remove(); }, 1500);
 }
 
+function bumpOpeningThrees() {
+  // Once every player has placed, all opening 3s become 4s and explode together
+  for (var r = 0; r < SIZE; r++)
+    for (var c = 0; c < SIZE; c++)
+      if (board[r][c].owner >= 0 && board[r][c].dots === 3) board[r][c].dots = 4;
+  updateAllCells(); updateCounts();
+}
+
 function doMove(r, c) {
   var cell = board[r][c];
   if (!placed[turn]) {
@@ -1943,7 +1951,7 @@ function doMove(r, c) {
     if (isBlockedByRadius(r, c)) return;
     cell.owner = turn; cell.dots = 3; placed[turn] = true;
     updateCell(r, c); updateCounts();
-    if (allPlaced()) clearBlockedSquares();
+    if (allPlaced()) { clearBlockedSquares(); if (!playgroundMode) bumpOpeningThrees(); }
     else updateBlockedSquares();
     processExplosions(function() {
       if (!playgroundMode && allPlaced() && checkWin()) return;
@@ -3105,7 +3113,7 @@ function olExecuteMove(r, c, cb) {
     if (isBlockedByRadius(r, c)) { if (cb) cb(); return; }
     cell.owner = turn; cell.dots = 3; placed[turn] = true;
     updateCell(r, c); updateCounts();
-    if (allPlaced()) clearBlockedSquares();
+    if (allPlaced()) { clearBlockedSquares(); if (!playgroundMode) bumpOpeningThrees(); }
     else updateBlockedSquares();
     processExplosions(function() {
       if (allPlaced() && olCheckWin()) { if (cb) cb(); return; }
@@ -3643,10 +3651,13 @@ if (typeof firebase !== 'undefined' && firebase && firebase.initializeApp) {
   // there's truly no session of any kind to restore.
 }
 
-// ======== ACCOUNT SIGN-IN (email/password — free, ties one real account to
-// one username) ========
-var isGoogleLinked = false; // true whenever a real (non-anonymous) email account is linked — name kept for minimal diff, no Google involved anymore
-var isEmailVerified = false;
+// ======== DEVICE-BASED IDENTITY ========
+// No email/password or verification: a "account" is simply this device/browser
+// (anonymous Firebase auth + the id and secret stored in localStorage).
+// The flags below are kept (always true) so the existing gates keep working.
+var isGoogleLinked = true;
+var isEmailVerified = true;
+var hasRealSession = false; // a legacy email session restored from before this change
 
 function toggleEmailForm() {
   var form = $('email-form');
@@ -3654,20 +3665,27 @@ function toggleEmailForm() {
   form.style.display = (form.style.display === 'none' || !form.style.display) ? '' : 'none';
   var st = $('email-form-status'); if (st) st.textContent = '';
 }
+function updateGoogleButtons() {
+  setDisplay('email-signin-btn', hasRealSession ? 'none' : '');
+  setDisplay('google-signout-btn', hasRealSession ? '' : 'none');
+  if (hasRealSession) setDisplay('email-form', 'none');
+}
+function updateVerifyBanner() {}
 
+// Optional email account: protects the username so only you can sign in to it
+// from any device. No email verification step.
 function emailSignIn() {
   if (!db || typeof firebase === 'undefined') { alert('Not available right now.'); return; }
   var email = ($('email-input') || {}).value || '';
   var pass = ($('email-password-input') || {}).value || '';
   var st = $('email-form-status');
   if (!email || !pass) { if (st) st.textContent = 'Enter an email and password.'; return; }
-  firebase.auth().signInWithEmailAndPassword(email.trim(), pass).then(function(result) {
+  hasRealSession = true;
+  firebase.auth().signInWithEmailAndPassword(email.trim(), pass).then(function() {
     if (st) st.textContent = '';
     toggleEmailForm();
-    // Make sure emailVerified reflects the LATEST state (they may have
-    // clicked the verify link in another tab since this session started)
-    result.user.reload().then(function() { applyLinkedUser(firebase.auth().currentUser); });
   }).catch(function(e) {
+    hasRealSession = false;
     if (st) st.textContent = e.message || 'Sign in failed.';
   });
 }
@@ -3679,183 +3697,107 @@ function emailSignUp() {
   var st = $('email-form-status');
   if (!email || !pass) { if (st) st.textContent = 'Enter an email and password.'; return; }
   if (pass.length < 6) { if (st) st.textContent = 'Password needs at least 6 characters.'; return; }
+  var oldName = myUsername;
+  hasRealSession = true;
   firebase.auth().createUserWithEmailAndPassword(email.trim(), pass).then(function(result) {
     if (st) st.textContent = '';
     toggleEmailForm();
-    result.user.sendEmailVerification().then(function() {
-      alert('Account created! A verification email was just sent to ' + result.user.email + ' — check your inbox (and spam folder).');
-    }).catch(function(sendErr) {
-      console.error('sendEmailVerification failed:', sendErr);
-      alert('Account created, but the verification email failed to send (' + (sendErr && sendErr.code ? sendErr.code : sendErr.message || sendErr) + '). Use the "Resend" button (top right) to try again.');
-    });
-    applyLinkedUser(result.user);
+    var newId = 'e_' + result.user.uid;
+    myUserId = newId;
+    localStorage.setItem('cr-userId', newId);
+    // Move this device's existing username onto the new account
+    if (oldName) {
+      var u = {};
+      u['usernames/' + oldName.toLowerCase()] = newId;
+      u['users/' + newId + '/username'] = oldName;
+      u['users/' + newId + '/secret'] = mySecretCode;
+      u['users/' + newId + '/lastSeen'] = firebase.database.ServerValue.TIMESTAMP;
+      u['users/' + newId + '/fingerprint'] = browserFingerprint;
+      db.ref().update(u).catch(function(e) { console.warn('Could not move username:', e); });
+    }
+    updateGoogleButtons();
+    alert('Account created. Sign in with this email and password on any device to keep your username.');
   }).catch(function(e) {
+    hasRealSession = false;
     if (st) st.textContent = e.message || 'Could not create account.';
   });
 }
 
-function resendVerificationEmail() {
-  var user = firebase.auth().currentUser;
-  if (!user) return;
-  user.sendEmailVerification().then(function() {
-    alert('Verification email sent to ' + user.email + '. Check your inbox (and spam folder).');
-  }).catch(function(e) {
-    alert('Could not send verification email: ' + e.message);
-  });
-}
-
-function recheckEmailVerified() {
-  var user = firebase.auth().currentUser;
-  if (!user) return;
-  user.reload().then(function() {
-    applyLinkedUser(firebase.auth().currentUser);
-    if (!firebase.auth().currentUser.emailVerified) {
-      alert('Still not verified — click the link in the email first, then try again.');
-    }
-  });
-}
-
 function signOutGoogle() {
-  if (!confirm('Sign out? You\'ll go back to a local guest account on this browser.')) return;
+  if (!confirm('Sign out? This browser goes back to a guest account.')) return;
   firebase.auth().signOut().then(function() {
-    isGoogleLinked = false;
-    isEmailVerified = false;
-    localStorage.removeItem('cr-google-uid');
-    // Fall back to a fresh local guest identity
-    myUserId = localStorage.getItem('cr-userId-guest') || ('u_' + Math.random().toString(36).substr(2, 10));
-    localStorage.setItem('cr-userId-guest', myUserId);
+    hasRealSession = false;
+    deviceAccountLoaded = false;
+    myUserId = 'u_' + Math.random().toString(36).substr(2, 10);
     localStorage.setItem('cr-userId', myUserId);
     myUsername = '';
     localStorage.removeItem('cr-username');
     updateGoogleButtons();
-    updateVerifyBanner();
     updateChatUsernameNotice();
     promptUsername();
     firebase.auth().signInAnonymously().catch(function() {});
   });
 }
-
-function updateGoogleButtons() {
-  setDisplay('email-signin-btn', isGoogleLinked ? 'none' : '');
-  setDisplay('google-signout-btn', isGoogleLinked ? '' : 'none');
-  if (isGoogleLinked) setDisplay('email-form', 'none');
-}
-
-function updateVerifyBanner() {
-  setDisplay('verify-banner', (isGoogleLinked && !isEmailVerified) ? '' : 'none');
-}
-
-// A username, chat, and online play all require a linked real (email)
-// account — this is the single gate every one of those entry points checks
-// first.
-function requireGoogleSignIn(actionLabel) {
-  if (isGoogleLinked && isEmailVerified) return true;
-  if (isGoogleLinked && !isEmailVerified) {
-    alert('Verify your email first to ' + actionLabel + '.\n\nCheck your inbox for the verification link, then click "I\'ve verified" (top right).');
-    return false;
-  }
-  alert('Sign in to ' + actionLabel + '.\n\nClick the ✉️ Sign in button (top right) with any email address.');
-  var form = $('email-form');
-  if (form) form.style.display = '';
-  return false;
-}
+function requireGoogleSignIn(actionLabel) { return true; }
 
 function goOnlinePanel(id) {
-  if (!requireGoogleSignIn('play online')) return;
   showOLPanel(id);
 }
 
-function accountPrefixFor(user) {
-  if (user.providerData && user.providerData.length) {
-    var pid = user.providerData[0].providerId;
-    if (pid === 'google.com') return 'g_';
-    if (pid === 'password') return 'e_';
-  }
-  return 'u_';
-}
-
-function applyLinkedUser(user) {
-  if (!user) return;
-  isGoogleLinked = true;
-  isEmailVerified = !!user.emailVerified;
-  myUserId = accountPrefixFor(user) + user.uid;
-  localStorage.setItem('cr-google-uid', myUserId);
-  localStorage.setItem('cr-userId', myUserId);
-  updateGoogleButtons();
-  updateVerifyBanner();
-  updateChatUsernameNotice();
-  checkBlockStatus(); // re-check now that myUserId points at the real account
-  // Look up whether this account already has a username on file
+// Look up the username tied to this device's id (or restore a legacy account
+// that this browser was already using) and set everything up.
+var deviceAccountLoaded = false;
+function loadDeviceAccount() {
+  if (deviceAccountLoaded) return;
+  deviceAccountLoaded = true;
+  checkBlockStatus();
   db.ref('users/' + myUserId + '/username').once('value', function(snap) {
     if (snap.exists() && snap.val()) {
       myUsername = snap.val();
       localStorage.setItem('cr-username', myUsername);
       showUsername(myUsername);
-      updateChatUsernameNotice();
-      loadChat();
-      tryAutoRejoinActiveRoom();
-    } else {
-      // First time linking this account — ask them to pick a username tied to it
+    } else if (!myUsername) {
       promptUsername();
-      var inp = $('uname-input');
-      if (inp && user.displayName) inp.value = user.displayName.replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 16);
     }
+    updateChatUsernameNotice();
+    loadChat();
+    tryAutoRejoinActiveRoom();
   }, function(err) {
     console.error('Could not read account username:', err);
-    alert('Signed in, but could not load your account (database error: ' + (err && err.code ? err.code : err.message || err) + '). Your database rules may be blocking reads on /users — check the Firebase console.');
-    // Still let them try to set a username even though the lookup failed
-    promptUsername();
+    if (!myUsername) promptUsername();
+    updateChatUsernameNotice();
+    loadChat();
   });
 }
 
-// Restore a previous session automatically on reload (email), or fall back
-// to an anonymous session only if there's genuinely no session anywhere.
-//
-// Two separate bugs lived here before:
-//  1. This tab's own signInAnonymously() call could race a real session
-//     that was still being restored, and sometimes won that race.
-//  2. Auth state is shared across every open tab on the same site (via
-//     IndexedDB) — so a completely different, freshly-opened tab correctly
-//     falling back to anonymous would fire onAuthStateChanged in THIS tab
-//     too, silently swapping an already-signed-in tab over to that other
-//     tab's anonymous session. That's the "keeps signing me out" bug: it
-//     didn't need this tab to do anything wrong at all.
-//
-// Fix: once we know we're linked, ignore any event that tries to demote us
-// back to anonymous — only an explicit Sign Out call is allowed to do that.
-// And before ever falling back to anonymous ourselves, check whether this
-// browser has a known linked account and, if so, give the real restore a
-// couple of seconds to win before giving up on it.
+// The page elements below this script may not exist yet when auth restores,
+// so re-apply the signed-in UI (and username) once the page is ready.
+window.addEventListener('DOMContentLoaded', function() {
+  updateGoogleButtons();
+  if (myUsername) showUsername(myUsername);
+});
+
 if (db && typeof firebase !== 'undefined') {
-  var authSettled = false;
+  try { firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch (e) {}
   firebase.auth().onAuthStateChanged(function(user) {
     if (user && !user.isAnonymous) {
-      authSettled = true;
-      applyLinkedUser(user);
+      // Old email session still present on this browser: keep using that id so
+      // the existing username keeps working, but never show email UI again.
+      hasRealSession = true;
+      var realId = ((user.providerData && user.providerData.length && user.providerData[0].providerId === 'password') ? 'e_' : 'u_') + user.uid;
+      if (myUserId !== realId) deviceAccountLoaded = false;
+      myUserId = realId;
+      localStorage.setItem('cr-userId', myUserId);
+      updateGoogleButtons();
+      loadDeviceAccount();
       return;
     }
-    if (isGoogleLinked) {
-      // We already have a real session in THIS tab's JS state. This event
-      // firing with no/anonymous user is almost certainly a side-effect of
-      // another tab, not a real sign-out — ignore it.
-      return;
-    }
+    if (hasRealSession) return;
     if (!user) {
-      var knownLinkedAccount = localStorage.getItem('cr-google-uid');
-      if (knownLinkedAccount && !authSettled) {
-        // This browser should have a real session — give it a moment to
-        // actually restore before assuming there's genuinely nothing there.
-        setTimeout(function() {
-          if (!authSettled && !isGoogleLinked) {
-            firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
-          }
-        }, 2000);
-      } else {
-        authSettled = true;
-        firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
-      }
+      firebase.auth().signInAnonymously().catch(function(e) { console.warn('Auth failed:', e); });
+      return;
     }
-    // else: user exists and is already anonymous, and we're not linked — nothing to do
+    loadDeviceAccount();
   });
 }
 
@@ -5199,10 +5141,10 @@ function loadMainPublicRooms() {
   <span class="uname-display" id="uname-display"></span>
   <input type="text" id="uname-input" placeholder="Enter username" maxlength="16">
   <button class="set-btn" id="uname-btn" onclick="toggleUsernameEdit()">Set username</button>
-  <button class="set-btn" id="email-signin-btn" onclick="toggleEmailForm()" style="background:rgba(255,255,255,0.35);" title="Sign in with any email address">✉️ Sign in</button>
+  <button class="set-btn" id="email-signin-btn" onclick="toggleEmailForm()" style="background:rgba(255,255,255,0.35);" title="Optional: protect your username with an email account">✉️ Email account</button>
   <button class="set-btn" id="google-signout-btn" onclick="signOutGoogle()" style="display:none;background:rgba(255,255,255,0.2);">Sign out</button>
-
   <div id="email-form" style="display:none;position:absolute;top:100%;right:0;margin-top:6px;background:var(--ui-bg);color:var(--text-dark);border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,0.25);width:220px;">
+    <div style="font-size:11px;margin-bottom:6px;">Optional: so only you can use your username, on any device.</div>
     <input type="email" id="email-input" placeholder="you@outlook.com" style="width:100%;padding:6px 8px;margin-bottom:6px;border:1px solid #ddd;border-radius:8px;font-size:13px;color:var(--text-dark);">
     <input type="password" id="email-password-input" placeholder="Password (min 6 chars)" style="width:100%;padding:6px 8px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;font-size:13px;color:var(--text-dark);">
     <div style="display:flex;gap:6px;">
@@ -5211,14 +5153,7 @@ function loadMainPublicRooms() {
     </div>
     <div id="email-form-status" style="font-size:11px;color:#e55;margin-top:6px;"></div>
   </div>
-</div>
 
-<div id="verify-banner" style="display:none;position:fixed;top:56px;right:12px;z-index:39;background:#fff3cd;color:#6b3a2a;border-radius:12px;padding:10px 14px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,0.15);max-width:260px;text-align:right;">
-  ✉️ Check your email to verify your account before you can chat or play online.
-  <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end;">
-    <button class="btn" style="padding:4px 10px;font-size:11px;" onclick="resendVerificationEmail()">Resend</button>
-    <button class="btn" style="padding:4px 10px;font-size:11px;" onclick="recheckEmailVerified()">I've verified</button>
-  </div>
 </div>
 
 <!-- CHAT -->
