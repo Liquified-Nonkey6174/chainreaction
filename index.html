@@ -538,6 +538,7 @@
   <span class="label">AI difficulty:</span>
   <div id="difficulty-btns" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;"></div>
 </div>
+<div id="mix-ai" style="margin-bottom:6px;"></div>
 <div class="row">
   <span class="label">Grid:</span>
   <div id="size-btns" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
@@ -635,6 +636,392 @@
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script>
+/* ===== Smartass AI (embedded) ===== */
+/* Chain Reaction - "Smartass AI"
+ * Standalone engine. Load it with a <script> tag; it exposes window.SmartassAI.
+ *   SmartassAI.pickMove(board, size, me, info)            -> [r, c] (one of me's own cells)
+ *   SmartassAI.pickPlacement(board, size, me, info, legal) -> [r, c] (opening 3)
+ * board[r][c] = { owner: -1|playerIndex, dots: 0..7 }
+ * info = { numPlayers, alive: [bool], order: [player ids that move after me, in turn order] (optional) }
+ * Weights were tuned with self-play simulations; most of the strength comes from the lookahead search.
+ */
+(function (root) {
+  'use strict';
+
+  var WEIGHTS = /*WEIGHTS_START*/ [0.991, 0.587, 0.92, 0.516, -1.402, 0.892, -0.59, 0.269, -0.059, -0.104] /*WEIGHTS_END*/;
+  // 5x5 boards use weights trained separately (with the extra features) in 1v1 self-play
+  var WEIGHTS_BY_SIZE = { 5: [1.167, 0.601, 0.864, 0.524, -1.335, 0.757, -0.882, 0.182, -0.264, -0.177, -0.028, 1.775, -0.007] };
+  var W_ELIM = 6.0;
+  var NF = 13;
+
+  // ---------- fast flat-board simulation (mirrors the real game's rules exactly) ----------
+  function toFlat(board, size) {
+    var n = size * size, own = new Int16Array(n), dots = new Int8Array(n);
+    for (var r = 0; r < size; r++) for (var c = 0; c < size; c++) {
+      var cell = board[r][c], i = r * size + c;
+      own[i] = cell.owner; dots[i] = cell.dots;
+    }
+    return { own: own, dots: dots };
+  }
+
+  var NB_CACHE = {};
+  function neighbours(size) {
+    if (NB_CACHE[size]) return NB_CACHE[size];
+    var n = size * size, nb = new Array(n);
+    for (var r = 0; r < size; r++) for (var c = 0; c < size; c++) {
+      var a = [];
+      if (r > 0) a.push((r - 1) * size + c);
+      if (r < size - 1) a.push((r + 1) * size + c);
+      if (c > 0) a.push(r * size + c - 1);
+      if (c < size - 1) a.push(r * size + c + 1);
+      nb[r * size + c] = a;
+    }
+    return (NB_CACHE[size] = nb);
+  }
+
+  // Runs the cascade. Returns number of players that still own squares, and the sole owner if only one.
+  // Mirrors processExplosions: whole waves in row-major order, game-over check after every wave.
+  function cascade(st, size, np) {
+    var own = st.own, dots = st.dots, n = size * size, nb = neighbours(size);
+    for (var step = 0; step < 400; step++) {
+      var any = false;
+      for (var i = 0; i < n; i++) {
+        if (dots[i] >= 4) {
+          any = true;
+          var o = own[i], a = nb[i];
+          dots[i] -= a.length;
+          if (dots[i] <= 0) { dots[i] = 0; own[i] = -1; }
+          for (var j = 0; j < a.length; j++) { own[a[j]] = o; dots[a[j]]++; }
+        }
+      }
+      if (!any) break;
+      // game-over check: only one owner left?
+      var first = -2, multi = false;
+      for (var k = 0; k < n; k++) {
+        if (own[k] >= 0) { if (first === -2) first = own[k]; else if (own[k] !== first) { multi = true; break; } }
+      }
+      if (!multi) break;
+    }
+  }
+
+  function clone(st) { return { own: new Int16Array(st.own), dots: new Int8Array(st.dots) }; }
+
+  function applyClick(st, size, np, idx) {
+    var s = clone(st);
+    s.dots[idx]++;
+    cascade(s, size, np);
+    return s;
+  }
+
+  // ---------- evaluation ----------
+  function features(st, size, np) {
+    var own = st.own, dots = st.dots, n = size * size, nb = neighbours(size);
+    var F = new Array(np);
+    for (var p = 0; p < np; p++) F[p] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    var seen = [];
+    for (var i = 0; i < n; i++) {
+      var q = own[i];
+      if (q < 0) continue;
+      var d = dots[i], f = F[q], a = nb[i];
+      f[0] += 1; f[1] += d;
+      if (d === 3) f[2] += 1;
+      if (d <= 2) f[3] += 3 - d;
+      if (a.length < 4) f[7] += 1;
+      var exposed = false, atk = null, standoff = false, nearTwo = false;
+      for (var j = 0; j < a.length; j++) {
+        var m = a[j], r = own[m];
+        if (r >= 0 && r !== q) { f[9] += 1; if (dots[m] === 2) nearTwo = true; }
+        if (r >= 0 && r !== q && dots[m] === 3) {
+          exposed = true;
+          if (d === 3) standoff = true;
+          if (!atk) atk = []; if (atk.indexOf(r) < 0) atk.push(r);
+        }
+      }
+      if (nearTwo) f[8] += 1;
+      var enemyNear = false, enemyHot = false;
+      for (var j2 = 0; j2 < a.length; j2++) {
+        var r2 = own[a[j2]];
+        if (r2 >= 0 && r2 !== q) { enemyNear = true; if (dots[a[j2]] >= 2) enemyHot = true; }
+      }
+      if (d <= 2 && !enemyHot) f[10] += 3 - d;
+      if (d === 3 && !enemyNear) f[11] += 1;
+      if (exposed) f[4] += d + 1;
+      if (standoff) f[6] += 1;
+      if (atk) for (var t = 0; t < atk.length; t++) F[atk[t]][5] += d + 1;
+    }
+    // largest connected cluster of 3s per player (chain-reaction potential)
+    var mark = new Uint8Array(n);
+    for (var s0 = 0; s0 < n; s0++) {
+      if (mark[s0] || dots[s0] !== 3 || own[s0] < 0) continue;
+      var owner = own[s0], stack = [s0], size2 = 0;
+      mark[s0] = 1;
+      while (stack.length) {
+        var cur = stack.pop(); size2++;
+        var an = nb[cur];
+        for (var z = 0; z < an.length; z++) {
+          var m2 = an[z];
+          if (!mark[m2] && dots[m2] === 3 && own[m2] === owner) { mark[m2] = 1; stack.push(m2); }
+        }
+      }
+      if (size2 > F[owner][12]) F[owner][12] = size2;
+    }
+    return F;
+  }
+
+  // Score of the position for player `me` (higher = better for me).
+  var OPP_MODE = { v: 0 }; // 0 = average opponent, 1 = strongest opponent, in between = blend
+  function evaluate(st, size, np, me, weights) {
+    var F = features(st, size, np);
+    if (F[me][0] === 0) return -1e9;
+    var opp = 0, sum = 0, mx = -Infinity;
+    for (var p = 0; p < np; p++) {
+      if (p === me) continue;
+      if (F[p][0] === 0) continue;
+      opp++;
+      var v = 0;
+      for (var k = 0; k < NF; k++) v += (weights[k] || 0) * F[p][k];
+      sum += v; if (v > mx) mx = v;
+    }
+    if (opp === 0) return 1e9;
+    var mine = 0;
+    for (var k2 = 0; k2 < NF; k2++) mine += (weights[k2] || 0) * F[me][k2];
+    var ref = (1 - OPP_MODE.v) * (sum / opp) + OPP_MODE.v * mx;
+    return mine - ref;
+  }
+
+  function aliveCounts(st, np) {
+    var c = new Array(np); for (var i = 0; i < np; i++) c[i] = 0;
+    for (var k = 0; k < st.own.length; k++) if (st.own[k] >= 0) c[st.own[k]]++;
+    return c;
+  }
+
+  // Opponent reply model: greedily takes whichever explosion (or doing nothing) is best for THEM.
+  function opponentReply(st, size, np, q, weights, maxCands) {
+    var base = evaluate(st, size, np, q, weights);
+    var bestScore = base, bestSt = st;
+    var cands = [];
+    for (var i = 0; i < st.own.length; i++) if (st.own[i] === q && st.dots[i] === 3) cands.push(i);
+    if (cands.length > maxCands) {
+      // prefer ones touching other players' squares
+      var nb = neighbours(size);
+      cands.sort(function (a, b) { return touches(st, nb, b, q) - touches(st, nb, a, q); });
+      cands.length = maxCands;
+    }
+    for (var c = 0; c < cands.length; c++) {
+      var s2 = applyClick(st, size, np, cands[c]);
+      var sc = evaluate(s2, size, np, q, weights);
+      if (sc > bestScore) { bestScore = sc; bestSt = s2; }
+    }
+    return bestSt;
+  }
+  // my own best explosion on the following turn (or doing nothing) - rewards keeping threats alive
+  function bestFollowup(st, size, np, me, weights, maxCands) {
+    return opponentReply(st, size, np, me, weights, maxCands);
+  }
+  function touches(st, nb, i, q) {
+    var a = nb[i], t = 0;
+    for (var j = 0; j < a.length; j++) if (st.own[a[j]] >= 0 && st.own[a[j]] !== q) t += 1 + st.dots[a[j]];
+    return t;
+  }
+
+  function derivedOrder(me, np, alive) {
+    var o = [];
+    for (var k = 1; k < np; k++) { var p = (me + k) % np; if (!alive || alive[p]) o.push(p); }
+    return o;
+  }
+
+
+  // ---------- exact 1v1 search (negamax with alpha-beta) ----------
+  // Used whenever exactly two players are left. Every click of every cell is considered.
+  function search2p(st, size, np, me, opp, weights, depth, alpha, beta, toMove, ctx) {
+    var own = st.own, n = size * size, i;
+    var c0 = 0, c1 = 0;
+    for (i = 0; i < n; i++) { if (own[i] === me) c0++; else if (own[i] === opp) c1++; }
+    if (c0 === 0) return -1e9 - depth;
+    if (c1 === 0) return 1e9 + depth;
+    if (depth === 0) return evaluate(st, size, np, me, weights);
+    ctx.nodes++;
+    if ((ctx.nodes & 7) === 0 && Date.now() > ctx.deadline) { ctx.aborted = true; return 0; }
+    var maximizing = (toMove === me), kids = [];
+    for (i = 0; i < n; i++) if (own[i] === toMove) {
+      var child = applyClick(st, size, np, i);
+      kids.push({ st: child, v: evaluate(child, size, np, me, weights) });
+    }
+    kids.sort(maximizing ? function (a, b) { return b.v - a.v; } : function (a, b) { return a.v - b.v; });
+    var limit = depth >= 3 ? ctx.wide : ctx.narrow;
+    if (kids.length > limit) kids.length = limit;
+    var best = maximizing ? -Infinity : Infinity;
+    for (var k = 0; k < kids.length; k++) {
+      var sc = search2p(kids[k].st, size, np, me, opp, weights, depth - 1, alpha, beta, maximizing ? opp : me, ctx);
+      if (maximizing) { if (sc > best) best = sc; if (best > alpha) alpha = best; }
+      else { if (sc < best) best = sc; if (best < beta) beta = best; }
+      if (beta <= alpha) break;
+      if (ctx.aborted) return 0;
+    }
+    return best;
+  }
+
+  function pickMove2p(st, size, np, me, opp, weights, opts) {
+    var n = size * size, own = [], i;
+    for (i = 0; i < n; i++) if (st.own[i] === me) own.push(i);
+    if (!own.length) return null;
+    var ctx = { nodes: 0, aborted: false, deadline: Date.now() + (opts.timeMs2p || 450), wide: opts.wide2p || 12, narrow: opts.narrow2p || 8 };
+    var rootKids = [];
+    for (var m = 0; m < own.length; m++) {
+      var child = applyClick(st, size, np, own[m]);
+      var v = evaluate(child, size, np, me, weights);
+      if (v >= 1e9) return own[m];
+      rootKids.push({ st: child, v: v, idx: own[m] });
+    }
+    rootKids.sort(function (a, b) { return b.v - a.v; });
+    var best = rootKids[0].idx;
+    var lim = Math.min(rootKids.length, opts.root2p || 16);
+    var maxD = opts.depth2p || 6;
+    // iterative deepening: keep the answer from the deepest search that finished in time
+    for (var d = 2; d <= maxD; d++) {
+      var dBest = null, dScore = -Infinity, alpha = -Infinity;
+      ctx.aborted = false;
+      for (var k = 0; k < lim; k++) {
+        var sc = search2p(rootKids[k].st, size, np, me, opp, weights, d - 1, alpha, Infinity, opp, ctx);
+        if (ctx.aborted) break;
+        sc += Math.random() * 1e-6;
+        if (sc > dScore) { dScore = sc; dBest = rootKids[k].idx; }
+        if (sc > alpha) alpha = sc;
+      }
+      if (ctx.aborted) break;
+      best = dBest;
+      if (dScore > 5e8 || dScore < -5e8) break; // forced win / loss found
+      // search the previous best first next time
+      for (var q = 1; q < lim; q++) if (rootKids[q].idx === best) { var t = rootKids[q]; rootKids.splice(q, 1); rootKids.unshift(t); break; }
+    }
+    return best;
+  }
+
+  var DEFAULT_OPTS = { topK: 24, replies: 4, maxOppCands: 24, maxCands: 70, followup: false, use2p: true, depth2p: 6, timeMs2p: 400, wide2p: 12, narrow2p: 8, root2p: 16 };
+
+  function pickMove(board, size, me, info, weights, opts) {
+    weights = weights || WEIGHTS_BY_SIZE[size] || WEIGHTS;
+    opts = opts || DEFAULT_OPTS;
+    var np = info.numPlayers;
+    var st = toFlat(board, size);
+    var order = (info.order && info.order.length) ? info.order : derivedOrder(me, np, info.alive);
+    var counts = aliveCounts(st, np);
+    order = order.filter(function (p) { return counts[p] > 0; });
+
+    if (opts.use2p && order.length === 1) {
+      var bi = pickMove2p(st, size, np, me, order[0], weights, opts);
+      if (bi !== null && bi !== undefined) return [Math.floor(bi / size), bi % size];
+    }
+    var own = [];
+    for (var i = 0; i < st.own.length; i++) if (st.own[i] === me) own.push(i);
+    if (!own.length) return null;
+    var nb = neighbours(size);
+
+    // candidate pruning on big boards
+    var cands = own;
+    if (own.length > opts.maxCands) {
+      var thr = [], rest = [];
+      for (var a = 0; a < own.length; a++) (st.dots[own[a]] === 3 ? thr : rest).push(own[a]);
+      for (var s = rest.length - 1; s > 0; s--) { var j = Math.floor(Math.random() * (s + 1)); var t = rest[s]; rest[s] = rest[j]; rest[j] = t; }
+      cands = thr.concat(rest.slice(0, Math.max(10, opts.maxCands - thr.length)));
+    }
+
+    var scored = [];
+    for (var c = 0; c < cands.length; c++) {
+      var idx = cands[c];
+      var s1 = applyClick(st, size, np, idx);
+      var sc = evaluate(s1, size, np, me, weights);
+      if (sc >= 1e9) return [Math.floor(idx / size), idx % size]; // immediate win
+      scored.push({ idx: idx, st: s1, score: sc });
+    }
+    scored.sort(function (x, y) { return y.score - x.score; });
+
+    var K = Math.min(opts.topK, scored.length), best = null, bestScore = -Infinity;
+    for (var k = 0; k < K; k++) {
+      var cur = scored[k].st, dead = false;
+      var nrep = Math.min(opts.replies, order.length);
+      for (var r = 0; r < nrep; r++) {
+        cur = opponentReply(cur, size, np, order[r], weights, opts.maxOppCands);
+      }
+      if (opts.followup) cur = bestFollowup(cur, size, np, me, weights, opts.maxOppCands);
+      var sc2 = evaluate(cur, size, np, me, weights);
+      // blend 1-ply and reply-aware score; reply-aware dominates
+      var total = sc2 * 0.8 + scored[k].score * 0.2 + Math.random() * 1e-6;
+      if (total > bestScore) { bestScore = total; best = scored[k].idx; }
+    }
+    if (best === null) best = scored[0].idx;
+    return [Math.floor(best / size), best % size];
+  }
+
+  // ---------- opening placement (Monte-Carlo rollouts) ----------
+  function blockedAt(own, size, r, c) {
+    for (var dr = -2; dr <= 2; dr++) for (var dc = -2; dc <= 2; dc++) {
+      if (!dr && !dc) continue;
+      var card = (dr === 0 || dc === 0);
+      var ok = card ? (Math.abs(dr) + Math.abs(dc) <= 2) : (Math.abs(dr) <= 1 && Math.abs(dc) <= 1);
+      if (!ok) continue;
+      var nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < size && nc >= 0 && nc < size && own[nr * size + nc] >= 0) return true;
+    }
+    return false;
+  }
+
+  function pickPlacement(board, size, me, info, legal, weights, rolls) {
+    weights = weights || WEIGHTS_BY_SIZE[size] || WEIGHTS;
+    rolls = rolls || 10;
+    var np = info.numPlayers;
+    if (!legal || !legal.length) return null;
+    var base = toFlat(board, size);
+    var unplaced = [];
+    for (var p = 0; p < np; p++) {
+      if (p === me) continue;
+      var has = false;
+      for (var i = 0; i < base.own.length; i++) if (base.own[i] === p) { has = true; break; }
+      if (!has) unplaced.push(p);
+    }
+    var cands = legal.slice();
+    if (cands.length > 36) {
+      for (var s = cands.length - 1; s > 0; s--) { var j = Math.floor(Math.random() * (s + 1)); var t = cands[s]; cands[s] = cands[j]; cands[j] = t; }
+      cands.length = 36;
+    }
+    var bestC = cands[0], bestV = -Infinity;
+    for (var c = 0; c < cands.length; c++) {
+      var total = 0;
+      for (var rr = 0; rr < rolls; rr++) {
+        var st = clone(base);
+        st.own[cands[c][0] * size + cands[c][1]] = me; st.dots[cands[c][0] * size + cands[c][1]] = 3;
+        var ord = unplaced.slice();
+        for (var q = 0; q < ord.length; q++) {
+          // random legal cell for each remaining player
+          var tries = 0, rrw, rcl;
+          do { rrw = Math.floor(Math.random() * size); rcl = Math.floor(Math.random() * size); tries++; }
+          while (tries < 40 && (st.own[rrw * size + rcl] >= 0 || blockedAt(st.own, size, rrw, rcl)));
+          if (tries >= 40) continue;
+          st.own[rrw * size + rcl] = ord[q]; st.dots[rrw * size + rcl] = 3;
+        }
+        for (var k = 0; k < st.own.length; k++) if (st.own[k] >= 0 && st.dots[k] === 3) st.dots[k] = 4;
+        cascade(st, size, np);
+        var v = evaluate(st, size, np, me, weights);
+        total += Math.max(-1e3, Math.min(1e3, v));
+      }
+      if (total > bestV) { bestV = total; bestC = cands[c]; }
+    }
+    return bestC;
+  }
+
+  var api = {
+    version: 1,
+    WEIGHTS: WEIGHTS,
+    pickMove: pickMove,
+    pickPlacement: pickPlacement,
+    _internals: { OPP_MODE: OPP_MODE, toFlat: toFlat, cascade: cascade, evaluate: evaluate, features: features, applyClick: applyClick, clone: clone, blockedAt: blockedAt, neighbours: neighbours, DEFAULT_OPTS: DEFAULT_OPTS }
+  };
+  root.SmartassAI = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
 <script>
 // Firebase fallback check
 if (typeof firebase === 'undefined') {
@@ -828,7 +1215,7 @@ function tournamentPointsForRank(rank) {
 function tournamentIdentity(i) {
   if (isAIPlayer[i]) {
     // AIs are tracked by colour since their colour stays the same across rounds
-    return PC(i).name + ' AI';
+    return aiName(i);
   }
   return PN(i);
 }
@@ -957,8 +1344,99 @@ function defaultColorMap() { colorMap = []; for (var i = 0; i < COLORS.length; i
 var SIZE = 5, NUM_HUMANS = 1, NUM_AIS = 1, NUM_PLAYERS = 2;
 var SIZES = [5, 8, 10, 12, 15, 20, 25, 30];
 var AI_DIFFICULTY = 'random';
-var AI_DIFFICULTIES = ['dumbass', 'random', 'subhuman', 'human', 'smart'];
-var AI_DIFFICULTY_LABELS = { subhuman: 'Subhuman', dumbass: 'Dumbass', random: 'Random', human: 'Human', smart: 'Smart' };
+var AI_DIFFICULTIES = ['dumbass', 'random', 'subhuman', 'human', 'smart', 'smartass'];
+var AI_DIFFICULTY_LABELS = { subhuman: 'Subhuman', dumbass: 'Dumbass', random: 'Random', human: 'Human', smart: 'Smart', smartass: 'Smartass' };
+
+
+// ---- "Smartass" AI: embedded above (see the "Smartass AI (embedded)" script block).
+var smartassState = (window.SmartassAI && window.SmartassAI.pickMove) ? 'ready' : 'failed';
+function ensureSmartassLoaded() {}
+function smartassReady() { ensureSmartassLoaded(); return smartassState === 'ready'; }
+function smartassInfo(me) {
+  var order = [], list = (matchOrder && matchOrder.length) ? matchOrder : null;
+  if (!list) { list = []; for (var i = 0; i < NUM_PLAYERS; i++) list.push(i); }
+  var idx = list.indexOf(me);
+  for (var k = 1; k < list.length; k++) {
+    var q = list[((idx < 0 ? 0 : idx) + k) % list.length];
+    if (q !== me && alive[q]) order.push(q);
+  }
+  return { numPlayers: NUM_PLAYERS, alive: alive, order: order };
+}
+function smartassPlacement(legal) {
+  if (aiDiffForSlot(turn) !== 'smartass' || !smartassReady() || !legal.length) return null;
+  try { return window.SmartassAI.pickPlacement(board, SIZE, turn, smartassInfo(turn), legal); } catch (e) { console.warn('Smartass placement failed', e); return null; }
+}
+
+// ---- Mix & match: choose how many AIs of each difficulty ----
+var AI_MIX = { on: false, counts: {} }; // counts[difficulty] = how many AIs; unassigned AIs use the default above
+function aiMixTotal() { var t = 0; for (var k in AI_MIX.counts) t += AI_MIX.counts[k] || 0; return t; }
+var aiDiffCache = { map: {} }; // colour index -> difficulty for the current game's AIs
+// Deals the chosen mix out randomly to the given AI colours (called once per game).
+// Colours that already have a difficulty keep it (so tournament rounds stay consistent).
+function dealAIMix(aiColours) {
+  var prev = aiDiffCache.map || {}, map = {};
+  if (!AI_MIX.on) { aiDiffCache = { map: {} }; return aiDiffCache.map; }
+  var list = [];
+  AI_DIFFICULTIES.forEach(function(d) { for (var i = 0; i < (AI_MIX.counts[d] || 0); i++) list.push(d); });
+  while (list.length < aiColours.length) list.push(AI_DIFFICULTY);
+  for (var i = list.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = list[i]; list[i] = list[j]; list[j] = t; }
+  var rest = [];
+  aiColours.forEach(function(c) {
+    var at = prev[c] !== undefined ? list.indexOf(prev[c]) : -1;
+    if (at >= 0) { map[c] = list.splice(at, 1)[0]; } else rest.push(c);
+  });
+  rest.forEach(function(c) { map[c] = list.pop() || AI_DIFFICULTY; });
+  aiDiffCache = { map: map };
+  return map;
+}
+function aiDiffForSlot(p) {
+  var key = (colorMap && colorMap[p] !== undefined) ? colorMap[p] : p;
+  var d = aiDiffCache.map[key];
+  if (!d) d = AI_DIFFICULTY;
+  if (d === 'smartass') ensureSmartassLoaded();
+  return d;
+}
+// Display name of the AI in slot p: "<colour> <difficulty> AI"
+function aiName(p) { return PC(p).name + ' ' + AI_DIFFICULTY_LABELS[aiDiffForSlot(p)] + ' AI'; }
+function renderMixUI(containerId, count, onChange) {
+  var c = document.getElementById(containerId); if (!c) return;
+  c.innerHTML = '';
+  if (count < 2) { return; } // nothing to mix with a single AI
+  // keep the assigned total within the number of AIs
+  var over = aiMixTotal() - count;
+  for (var di = AI_DIFFICULTIES.length - 1; di >= 0 && over > 0; di--) {
+    var dn = AI_DIFFICULTIES[di], have = AI_MIX.counts[dn] || 0, cut = Math.min(have, over);
+    AI_MIX.counts[dn] = have - cut; over -= cut;
+  }
+  var lab = document.createElement('label');
+  lab.style.cssText = 'font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;justify-content:center;margin:2px 0 4px;';
+  var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = AI_MIX.on;
+  cb.onchange = function() { AI_MIX.on = cb.checked; renderMixUI(containerId, count, onChange); if (onChange) onChange(); };
+  lab.appendChild(cb); lab.appendChild(document.createTextNode('Mix & match (choose how many of each)'));
+  c.appendChild(lab);
+  if (!AI_MIX.on) return;
+  var total = aiMixTotal();
+  var grid = document.createElement('div');
+  grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px 12px;justify-content:center;padding:2px;';
+  AI_DIFFICULTIES.forEach(function(d) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;';
+    var name = document.createElement('span'); name.textContent = AI_DIFFICULTY_LABELS[d]; name.style.minWidth = '62px';
+    var minus = document.createElement('button'); minus.className = 'btn'; minus.textContent = '\u2212'; minus.style.cssText = 'padding:1px 8px;min-width:0;';
+    var num = document.createElement('span'); num.textContent = AI_MIX.counts[d] || 0; num.style.cssText = 'min-width:18px;text-align:center;font-weight:700;';
+    var plus = document.createElement('button'); plus.className = 'btn'; plus.textContent = '+'; plus.style.cssText = 'padding:1px 8px;min-width:0;';
+    minus.disabled = !(AI_MIX.counts[d] > 0); plus.disabled = total >= count;
+    minus.onclick = function() { AI_MIX.counts[d] = Math.max(0, (AI_MIX.counts[d] || 0) - 1); renderMixUI(containerId, count, onChange); };
+    plus.onclick = function() { if (aiMixTotal() >= count) return; AI_MIX.counts[d] = (AI_MIX.counts[d] || 0) + 1; if (d === 'smartass') ensureSmartassLoaded(); renderMixUI(containerId, count, onChange); };
+    wrap.appendChild(name); wrap.appendChild(minus); wrap.appendChild(num); wrap.appendChild(plus);
+    grid.appendChild(wrap);
+  });
+  c.appendChild(grid);
+  var note = document.createElement('div');
+  note.style.cssText = 'font-size:11px;text-align:center;opacity:0.8;margin-top:4px;';
+  note.textContent = total + ' of ' + count + ' AIs assigned' + (total < count ? ' \u2014 the other ' + (count - total) + ' use the difficulty chosen above' : '');
+  c.appendChild(note);
+}
 
 function buildDifficultyButtons() {
   var c = document.getElementById('difficulty-btns');
@@ -970,7 +1448,7 @@ function buildDifficultyButtons() {
     b.className = 'btn' + (d === AI_DIFFICULTY ? ' active' : '');
     b.textContent = AI_DIFFICULTY_LABELS[d];
     (function(dd) {
-      b.onclick = function() { AI_DIFFICULTY = dd; buildDifficultyButtons(); };
+      b.onclick = function() { AI_DIFFICULTY = dd; if (dd === 'smartass') ensureSmartassLoaded(); buildDifficultyButtons(); };
     })(d);
     c.appendChild(b);
   }
@@ -1077,6 +1555,16 @@ function pickAIOwnCell(b, size, turn, difficulty) {
     for (var c = 0; c < size; c++)
       if (b[r][c].owner === turn) own.push([r, c]);
   if (own.length === 0) return null;
+
+  if (difficulty === 'smartass') {
+    if (smartassReady()) {
+      try {
+        var sp = window.SmartassAI.pickMove(b, size, turn, smartassInfo(turn));
+        if (sp) return sp;
+      } catch (e) { console.warn('Smartass failed, using Smart', e); }
+    }
+    difficulty = 'smart'; // not loaded (yet) or failed
+  }
 
   if (difficulty === 'subhuman') {
     // Avoids clicking a 3 next to opponent's 3 AND avoids creating a 3 next to opponent's 3
@@ -1193,6 +1681,7 @@ function buildAIButtons() {
     })(i);
     c.appendChild(b);
   }
+  renderMixUI('mix-ai', NUM_AIS);
 }
 
 function buildSizeButtons() {
@@ -1459,8 +1948,11 @@ function confirmColours() {
     if (colorMap[i] < 0) return;
   }
   assignAIColours();
+  var aiCols = [];
+  for (var i = 0; i < NUM_PLAYERS; i++) if (isAIPlayer[i]) aiCols.push(colorMap[i]);
+  dealAIMix(aiCols);
   for (var i = 0; i < NUM_PLAYERS; i++) {
-    if (isAIPlayer[i]) playerNames[i] = PC(i).name + ' AI';
+    if (isAIPlayer[i]) playerNames[i] = aiName(i);
   }
   // Set randomize flag and shuffle match order once
   var cb = $('cp-randomize-order');
@@ -2043,10 +2535,10 @@ function aiMove() {
       for (var c = 0; c < SIZE; c++)
         if (board[r][c].owner < 0 && !isBlockedByRadius(r, c)) empty.push([r, c]);
     if (empty.length === 0) return;
-    var pick = empty[Math.floor(Math.random() * empty.length)];
+    var pick = smartassPlacement(empty) || empty[Math.floor(Math.random() * empty.length)];
     doMove(pick[0], pick[1]); return;
   }
-  var pick = pickAIOwnCell(board, SIZE, turn, AI_DIFFICULTY);
+  var pick = pickAIOwnCell(board, SIZE, turn, aiDiffForSlot(turn));
   if (!pick) return;
   doMove(pick[0], pick[1]);
 }
@@ -2557,7 +3049,9 @@ function playAgain() {
             usedColors[ci] = true;
           }
         }
-        channel.publish('newgame', { slotMap: slotMap, numPlayers: totalPlayers, numAIs: olAIs, size: SIZE, randomizeEnabled: randomizeEnabled, colorMap: newColorMap });
+        var aiColsNG = newColorMap.slice(slotMap.length);
+        var aiDiffsNG = dealAIMix(aiColsNG);
+        channel.publish('newgame', { aiDiffs: aiDiffsNG, slotMap: slotMap, numPlayers: totalPlayers, numAIs: olAIs, size: SIZE, randomizeEnabled: randomizeEnabled, colorMap: newColorMap });
       });
     }
   } else {
@@ -2759,7 +3253,7 @@ function buildOLDifficultyRow(containerId) {
   var c = document.getElementById(containerId); if (!c) return; c.innerHTML = '';
   AI_DIFFICULTIES.forEach(function(d) {
     var b = document.createElement('button'); b.className = 'sbtn' + (d === AI_DIFFICULTY ? ' active' : ''); b.textContent = AI_DIFFICULTY_LABELS[d];
-    b.onclick = function() { AI_DIFFICULTY = d; buildOLDifficultyRow(containerId); };
+    b.onclick = function() { AI_DIFFICULTY = d; if (d === 'smartass') ensureSmartassLoaded(); buildOLDifficultyRow(containerId); };
     c.appendChild(b);
   });
 }
@@ -2771,6 +3265,7 @@ function buildOLCreateBtns() {
   buildOLNumRow('ol-c-humans', 0, mp, olHumans, function(n) { olHumans = n; if (olHumans + olAIs > olMaxPlayers()) olAIs = olMaxPlayers() - olHumans; if (olHumans + olAIs < 2 && olAIs < 1) olAIs = 1; buildOLCreateBtns(); });
   buildOLNumRow('ol-c-ais', 0, mp - olHumans, olAIs, function(n) { olAIs = n; buildOLCreateBtns(); });
   buildOLDifficultyRow('ol-c-difficulty');
+  renderMixUI('ol-c-mix', olAIs);
   buildOLSizeRow('ol-c-size', olSize, function(n) { olSize = n; if (olHumans + olAIs > olMaxPlayers()) { olAIs = Math.max(0, olMaxPlayers() - olHumans); if (olHumans > olMaxPlayers()) olHumans = olMaxPlayers(); } buildOLCreateBtns(); });
 }
 
@@ -3022,7 +3517,9 @@ function olConfirmColours() {
     }
   }
 
-  channel.publish('start', { size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap, shuffledOrder: shuffledOrder, randomizeEnabled: !!(rcb && rcb.checked), tournamentEnabled: !!($('ol-tournament-mode') && $('ol-tournament-mode').checked) });
+  var aiColsHost = []; for (var q = NUM_HUMANS; q < NUM_PLAYERS; q++) aiColsHost.push(finalMap[q]);
+  var aiDiffsOut = dealAIMix(aiColsHost);
+  channel.publish('start', { aiDiffs: aiDiffsOut, size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap, shuffledOrder: shuffledOrder, randomizeEnabled: !!(rcb && rcb.checked), tournamentEnabled: !!($('ol-tournament-mode') && $('ol-tournament-mode').checked) });
 }
 
 function onOLStart(msg) {
@@ -3052,9 +3549,10 @@ function onOLStart(msg) {
   }
   // Set player names and AI flags from slot map
   playerNames = []; isAIPlayer = [];
+  aiDiffCache = { map: d.aiDiffs || {} };
   for (var i = 0; i < d.numPlayers; i++) {
     if (i < d.slotMap.length) { playerNames.push(d.slotMap[i].name); isAIPlayer.push(false); }
-    else { playerNames.push(PC(i).name + ' AI'); isAIPlayer.push(true); }
+    else { playerNames.push(aiName(i)); isAIPlayer.push(true); }
   }
   // Apply randomized order if provided
   matchOrder = [];
@@ -3175,9 +3673,9 @@ function olDoAI() {
     var empty = [];
     for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (board[r][c].owner < 0 && !isBlockedByRadius(r, c)) empty.push([r, c]);
     if (!empty.length) return;
-    pick = empty[Math.floor(Math.random() * empty.length)];
+    pick = smartassPlacement(empty) || empty[Math.floor(Math.random() * empty.length)];
   } else {
-    pick = pickAIOwnCell(board, SIZE, turn, AI_DIFFICULTY);
+    pick = pickAIOwnCell(board, SIZE, turn, aiDiffForSlot(turn));
     if (!pick) return;
   }
   channel.publish('move', { r: pick[0], c: pick[1], player: turn });
@@ -4841,9 +5339,10 @@ onOLNewGame = function(msg) {
         colorMap.push(d.colorMap[i] !== undefined ? d.colorMap[i] : i);
       }
     } else { defaultColorMap(); }
+    if (d.aiDiffs) aiDiffCache = { map: d.aiDiffs };
     for (var i = 0; i < NUM_PLAYERS; i++) {
       if (i < d.slotMap.length) { playerNames.push(d.slotMap[i].name); isAIPlayer.push(false); }
-      else { isAIPlayer.push(true); playerNames.push(PC(i).name + ' AI'); }
+      else { isAIPlayer.push(true); playerNames.push(aiName(i)); }
     }
     // Update online info
     var oi = $('online-info');
@@ -5042,6 +5541,7 @@ function loadMainPublicRooms() {
     <div class="ol-row"><span class="ol-label">Human slots:</span><div id="ol-c-humans"></div></div>
     <div class="ol-row"><span class="ol-label">AIs:</span><div id="ol-c-ais"></div></div>
     <div class="ol-row"><span class="ol-label">AI difficulty:</span><div id="ol-c-difficulty"></div></div>
+    <div id="ol-c-mix" style="margin-bottom:6px;"></div>
     <div class="ol-row"><span class="ol-label">Grid:</span><div id="ol-c-size"></div></div>
     <div class="ol-row"><span class="ol-label">Visibility:</span>
       <button class="sbtn active" id="vis-public" onclick="olVisibility='public';document.getElementById('vis-public').className='sbtn active';document.getElementById('vis-private').className='sbtn';">Public</button>
