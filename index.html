@@ -552,7 +552,6 @@
 <div class="online-info" id="online-info" style="display:none;"></div>
 
 <div class="row sort-btn">
-  <button class="btn" id="sort-btn" onclick="toggleSort()">Sort by dots</button>
   <button class="btn" id="forfeit-btn" onclick="forfeit()" style="margin-left:4px;background:rgba(239,123,123,0.3);">Forfeit</button>
 </div>
 <div class="player-bar" id="player-bar"></div>
@@ -626,6 +625,12 @@
         <span class="opt-label">Tournament mode</span>
         <span class="opt-switch"><span class="opt-knob"></span></span>
       </div>
+      <div class="opt-toggle" id="cp-lastplace-toggle" onclick="toggleOpt('cp-lastplace-mode','cp-lastplace-toggle')">
+        <span class="opt-icon">💀</span>
+        <span class="opt-label">Last Place Wins (first out wins)</span>
+        <span class="opt-switch"><span class="opt-knob"></span></span>
+      </div>
+      <input type="checkbox" id="cp-lastplace-mode" style="display:none;">
       <input type="checkbox" id="cp-randomize-order" style="display:none;">
       <input type="checkbox" id="cp-tournament-mode" style="display:none;">
     </div>
@@ -770,10 +775,11 @@
   }
 
   // Score of the position for player `me` (higher = better for me).
+  var LOSE = { v: false }; // "Last Place Wins": the goal is to be knocked out first
   var OPP_MODE = { v: 0 }; // 0 = average opponent, 1 = strongest opponent, in between = blend
   function evaluate(st, size, np, me, weights) {
     var F = features(st, size, np);
-    if (F[me][0] === 0) return -1e9;
+    if (F[me][0] === 0) return LOSE.v ? 1e9 : -1e9;
     var opp = 0, sum = 0, mx = -Infinity;
     for (var p = 0; p < np; p++) {
       if (p === me) continue;
@@ -783,7 +789,7 @@
       for (var k = 0; k < NF; k++) v += (weights[k] || 0) * F[p][k];
       sum += v; if (v > mx) mx = v;
     }
-    if (opp === 0) return 1e9;
+    if (opp === 0) return LOSE.v ? -1e9 : 1e9;
     var mine = 0;
     for (var k2 = 0; k2 < NF; k2++) mine += (weights[k2] || 0) * F[me][k2];
     var ref = (1 - OPP_MODE.v) * (sum / opp) + OPP_MODE.v * mx;
@@ -838,8 +844,8 @@
     var own = st.own, n = size * size, i;
     var c0 = 0, c1 = 0;
     for (i = 0; i < n; i++) { if (own[i] === me) c0++; else if (own[i] === opp) c1++; }
-    if (c0 === 0) return -1e9 - depth;
-    if (c1 === 0) return 1e9 + depth;
+    if (c0 === 0) return LOSE.v ? 1e9 + depth : -1e9 - depth;
+    if (c1 === 0) return LOSE.v ? -1e9 - depth : 1e9 + depth;
     if (depth === 0) return evaluate(st, size, np, me, weights);
     ctx.nodes++;
     if ((ctx.nodes & 7) === 0 && Date.now() > ctx.deadline) { ctx.aborted = true; return 0; }
@@ -903,6 +909,8 @@
   function pickMove(board, size, me, info, weights, opts) {
     weights = weights || WEIGHTS_BY_SIZE[size] || WEIGHTS;
     opts = opts || DEFAULT_OPTS;
+    LOSE.v = !!info.lose;
+    if (LOSE.v) weights = weights.map(function (x) { return -x; });
     var np = info.numPlayers;
     var st = toFlat(board, size);
     var order = (info.order && info.order.length) ? info.order : derivedOrder(me, np, info.alive);
@@ -969,6 +977,8 @@
 
   function pickPlacement(board, size, me, info, legal, weights, rolls) {
     weights = weights || WEIGHTS_BY_SIZE[size] || WEIGHTS;
+    LOSE.v = !!info.lose;
+    if (LOSE.v) weights = weights.map(function (x) { return -x; });
     rolls = rolls || 10;
     var np = info.numPlayers;
     if (!legal || !legal.length) return null;
@@ -1187,6 +1197,38 @@ var COLORS_ALPHA_ORDER = (function() {
 var colorMap = []; // colorMap[playerIndex] = COLORS index
 var playerNames = []; // playerNames[playerIndex] = display name
 var elimOrder = []; // tracks elimination order (last = died first)
+// ---- "Last Place Wins" mode: the first player knocked out wins; the rest keep playing for the other places ----
+var lastPlaceWins = false;
+var lpwAnnounced = false;
+// Placings from best to worst: [{ e: index in elimOrder, pi: player, rank }]
+function rankedEntries() {
+  var out = [], e;
+  if (!lastPlaceWins) {
+    for (e = elimOrder.length - 1; e >= 0; e--) out.push({ e: e, pi: elimOrder[e], rank: NUM_PLAYERS - e });
+    return out;
+  }
+  var normal = [], forf = [], surv = [];
+  for (e = 0; e < elimOrder.length; e++) {
+    var inf = elimInfo[elimOrder[e]];
+    if (inf && inf.isWinner) surv.push(e);          // the last survivor comes last
+    else if (inf && inf.isForfeit) forf.push(e);    // forfeiting can't win this mode
+    else normal.push(e);
+  }
+  normal.concat(forf, surv).forEach(function(ei, idx) { out.push({ e: ei, pi: elimOrder[ei], rank: idx + 1 }); });
+  return out;
+}
+function lpwAnnounceFirst() {
+  if (!lastPlaceWins || lpwAnnounced) return;
+  var ents = rankedEntries(); if (!ents.length) return;
+  var aliveCount = 0; for (var i = 0; i < NUM_PLAYERS; i++) if (alive[i]) aliveCount++;
+  if (aliveCount <= 1) return;
+  lpwAnnounced = true;
+  var el = document.createElement('div');
+  el.style.cssText = 'position:fixed;top:14%;left:50%;transform:translateX(-50%);background:#fff;color:#6b3a2a;padding:12px 22px;border-radius:14px;font-size:14px;font-weight:700;box-shadow:0 8px 30px rgba(0,0,0,0.25);z-index:60;pointer-events:none;text-align:center;';
+  el.textContent = '\ud83c\udfc6 ' + PN(ents[0].pi) + ' is out first and wins! Keep playing to settle the other places.';
+  document.body.appendChild(el);
+  setTimeout(function() { el.remove(); }, 4500);
+}
 var elimInfo = {}; // elimInfo[playerIdx] = {round, killedBy}
 var killCounts = []; // kills per player
 var roundNum = 0;
@@ -1223,9 +1265,10 @@ function tournamentIdentity(i) {
 function recordTournamentRound() {
   if (!tournamentActive) return;
   tournamentRound++;
-  for (var e = 0; e < elimOrder.length; e++) {
-    var pi = elimOrder[e];
-    var rank = elimOrder.length - e;
+  var _tents = rankedEntries();
+  for (var _tk = 0; _tk < _tents.length; _tk++) {
+    var pi = _tents[_tk].pi;
+    var rank = _tents[_tk].rank;
     var pts = tournamentPointsForRank(rank);
     var id = tournamentIdentity(pi);
     if (!tournamentScores[id]) tournamentScores[id] = { points: 0, games: 0, best: Infinity, color: PC(pi).dot };
@@ -1360,10 +1403,11 @@ function smartassInfo(me) {
     var q = list[((idx < 0 ? 0 : idx) + k) % list.length];
     if (q !== me && alive[q]) order.push(q);
   }
-  return { numPlayers: NUM_PLAYERS, alive: alive, order: order };
+  return { numPlayers: NUM_PLAYERS, alive: alive, order: order, lose: lastPlaceWins };
 }
 function smartassPlacement(legal) {
-  if (aiDiffForSlot(turn) !== 'smartass' || !smartassReady() || !legal.length) return null;
+  var _sd = aiDiffForSlot(turn);
+  if (!(_sd === 'smartass' || (lastPlaceWins && (_sd === 'smart' || _sd === 'human'))) || !smartassReady() || !legal.length) return null;
   try { return window.SmartassAI.pickPlacement(board, SIZE, turn, smartassInfo(turn), legal); } catch (e) { console.warn('Smartass placement failed', e); return null; }
 }
 
@@ -1556,7 +1600,7 @@ function pickAIOwnCell(b, size, turn, difficulty) {
       if (b[r][c].owner === turn) own.push([r, c]);
   if (own.length === 0) return null;
 
-  if (difficulty === 'smartass') {
+  if (difficulty === 'smartass' || (lastPlaceWins && (difficulty === 'smart' || difficulty === 'human'))) {
     if (smartassReady()) {
       try {
         var sp = window.SmartassAI.pickMove(b, size, turn, smartassInfo(turn));
@@ -1705,7 +1749,7 @@ function initBoard() {
     board[r] = [];
     for (var c = 0; c < SIZE; c++) board[r][c] = { owner: -1, dots: 0 };
   }
-  placed = []; alive = []; elimOrder = []; elimInfo = {}; killCounts = [];
+  placed = []; alive = []; elimOrder = []; elimInfo = {}; killCounts = []; lpwAnnounced = false;
   roundNum = 0; moveNum = 0;
   for (var i = 0; i < NUM_PLAYERS; i++) { placed.push(false); alive.push(true); killCounts.push(0); }
   animating = false;
@@ -1975,6 +2019,8 @@ function confirmColours() {
   // Tournament mode
   var tcb = $('cp-tournament-mode');
   tournamentActive = !!(tcb && tcb.checked);
+  var lcb = $('cp-lastplace-mode');
+  lastPlaceWins = !!(lcb && lcb.checked);
   tournamentScores = {};
   tournamentRound = 0;
   setDisplay('cp-panel', 'none');
@@ -1989,13 +2035,31 @@ function renderSideLB() {
   var list = document.getElementById('side-lb-list');
   if (!list) return;
   list.innerHTML = '';
-  if (elimOrder.length === 0) {
-    list.innerHTML = '<div class="side-lb-empty">No eliminations yet</div>';
-  } else {
-    for (var e = elimOrder.length - 1; e >= 0; e--) {
-      var pi = elimOrder[e];
-      var rank = NUM_PLAYERS - e;
-      var info = elimInfo[pi];
+  // Live leaderboard: players still alive (ordered by dots) and eliminated players
+  // (ordered by placing), with a line between the two groups.
+  var dead = rankedEntries();
+  var pcs = (board ? getPlayerCounts() : null);
+  var dotsOf = function(i) { return pcs ? pcs.dotCounts[i] : 0; };
+  var aliveList = [];
+  for (var ai = 0; ai < NUM_PLAYERS; ai++) if (alive[ai]) aliveList.push(ai);
+  // normal mode: most dots = best. Last Place Wins: fewest dots = closest to winning.
+  aliveList.sort(function(x, y) { return lastPlaceWins ? (dotsOf(x) - dotsOf(y)) : (dotsOf(y) - dotsOf(x)); });
+  var aliveRows = aliveList.map(function(pi, idx) {
+    return { pi: pi, rank: lastPlaceWins ? dead.length + idx + 1 : idx + 1, info: null, alive: true };
+  });
+  var deadRows = dead.map(function(d) { return { pi: d.pi, rank: d.rank, info: elimInfo[d.pi], alive: false }; });
+  var groups = lastPlaceWins ? [deadRows, aliveRows] : [aliveRows, deadRows];
+  var firstShown = false;
+  groups.forEach(function(rows) {
+    if (!rows.length) return;
+    if (firstShown) {
+      var sep = document.createElement('div');
+      sep.style.cssText = 'border-top:2px solid rgba(0,0,0,0.3);margin:5px 0;';
+      list.appendChild(sep);
+    }
+    firstShown = true;
+    rows.forEach(function(r) {
+      var pi = r.pi, rank = r.rank, info = r.info;
       var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
       var row = document.createElement('div');
       row.className = 'side-lb-row';
@@ -2019,14 +2083,16 @@ function renderSideLB() {
 
       var roundEl = document.createElement('span');
       roundEl.className = 'lb-round';
-      if (info && info.isWinner) roundEl.textContent = '—';
-      else if (info && info.isForfeit) roundEl.textContent = 'R' + info.round;
+      if (r.alive) roundEl.textContent = dotsOf(pi) + '●';
+      else if (info && info.isWinner) roundEl.textContent = '—';
       else if (info) roundEl.textContent = 'R' + info.round;
       row.appendChild(roundEl);
 
       var killerEl = document.createElement('span');
       killerEl.className = 'lb-killer';
-      if (info && info.isWinner) killerEl.textContent = 'Winner';
+      if (r.alive) killerEl.textContent = 'Alive';
+      else if (lastPlaceWins ? rank === 1 : (info && info.isWinner)) killerEl.textContent = 'Winner';
+      else if (info && info.isWinner) killerEl.textContent = 'Last place';
       else if (info && info.isForfeit) killerEl.textContent = 'Forfeit';
       else if (info && info.killedBy >= 0 && info.killedBy !== pi) killerEl.textContent = PN(info.killedBy);
       else killerEl.textContent = '—';
@@ -2038,10 +2104,9 @@ function renderSideLB() {
         ptsEl.textContent = '+' + tournamentPointsForRank(rank) + 'pts';
         row.appendChild(ptsEl);
       }
-
       list.appendChild(row);
-    }
-  }
+    });
+  });
   // Kills leaderboard
   if (NUM_PLAYERS > 1 && killCounts && killCounts.length > 0) {
     var hasKills = false;
@@ -2132,13 +2197,6 @@ function renderGrid() {
 
 var sortByDots = false;
 
-function toggleSort() {
-  sortByDots = !sortByDots;
-  document.getElementById('sort-btn').className = 'btn' + (sortByDots ? ' active' : '');
-  renderPlayerBar();
-  updateUI();
-}
-
 function renderPlayerBar() {
   var bar = document.getElementById('player-bar');
   bar.innerHTML = '';
@@ -2192,7 +2250,7 @@ function renderPlayerBar() {
       if (place >= 0) {
         var plc = document.createElement('span');
         plc.style.cssText = 'font-size:9px;opacity:0.6;';
-        plc.textContent = '#' + (NUM_PLAYERS - place);
+        var _pe = rankedEntries().filter(function(x) { return x.e === place; })[0]; plc.textContent = '#' + (_pe ? _pe.rank : (NUM_PLAYERS - place));
         badges.appendChild(plc);
       }
     }
@@ -2227,6 +2285,7 @@ function renderPlayerBar() {
 }
 
 function updateCounts() {
+  if (gameStarted && !playgroundMode && board && document.getElementById('side-lb-list')) { try { renderSideLB(); } catch (e) {} }
   if (sortByDots) {
     // Re-render but with classes applied immediately
     renderPlayerBar();
@@ -2622,6 +2681,7 @@ function checkWin() {
     }
   }
   renderSideLB(); renderPlayerBar();
+  lpwAnnounceFirst();
   var aliveCount = 0, winner = -1;
   for (var i = 0; i < NUM_PLAYERS; i++) {
     if (alive[i]) { aliveCount++; winner = i; }
@@ -2639,20 +2699,23 @@ function checkWin() {
 
 function showWin(p) {
   animating = false;
+  if (lastPlaceWins) { var _re = rankedEntries(); if (_re.length) p = _re[0].pi; }
   wins[p]++;
   var title = document.getElementById('win-title');
   title.textContent = PN(p) + (PN(p).toLowerCase() === 'you' ? ' win!' : ' wins!');
   title.style.color = PC(p).dot;
   var sub = document.querySelector('.win-sub');
   var lb = '<div style="text-align:left;font-size:12px;margin:0.5rem 0;">';
-  lb += '<div style="font-weight:700;margin-bottom:4px;">Leaderboard</div>';
-  for (var e = elimOrder.length - 1; e >= 0; e--) {
-    var pi = elimOrder[e];
-    var rank = NUM_PLAYERS - e;
+  lb += '<div style="font-weight:700;margin-bottom:4px;">Leaderboard' + (lastPlaceWins ? ' \u2014 Last Place Wins' : '') + '</div>';
+  var _ents = rankedEntries();
+    for (var _k = 0; _k < _ents.length; _k++) {
+    var e = _ents[_k].e;
+    var pi = _ents[_k].pi;
+    var rank = _ents[_k].rank;
     var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
     var info = elimInfo[pi];
     var detail = '';
-    if (info && info.isWinner) detail = 'Winner!'; else if (info && info.isForfeit) detail = 'Forfeit';
+    if (lastPlaceWins ? rank === 1 : (info && info.isWinner)) detail = 'Winner!'; else if (info && info.isWinner) detail = 'Last place'; else if (info && info.isForfeit) detail = 'Forfeit';
     else if (info) { detail = 'R' + info.round; if (info.killedBy >= 0 && info.killedBy !== pi) detail += ', by ' + PN(info.killedBy); }
     lb += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><span style="font-weight:700;min-width:20px;">' + medal + '</span><span style="width:8px;height:8px;border-radius:50%;background:'+PC(pi).dot+';display:inline-block;"></span> ' + PN(pi) + (detail ? '<span style="font-size:10px;opacity:0.5;margin-left:auto;">' + detail + '</span>' : '') + '</div>';
   }
@@ -2962,6 +3025,7 @@ function goMainMenu() {
   animating = false;
   pgAnimating = false;
   tournamentActive = false;
+  lastPlaceWins = false;
   tournamentScores = {};
   tournamentRound = 0;
   var stlb = $('side-tourn-lb'); if (stlb) stlb.className = 'side-tourn-lb';
@@ -3051,7 +3115,7 @@ function playAgain() {
         }
         var aiColsNG = newColorMap.slice(slotMap.length);
         var aiDiffsNG = dealAIMix(aiColsNG);
-        channel.publish('newgame', { aiDiffs: aiDiffsNG, slotMap: slotMap, numPlayers: totalPlayers, numAIs: olAIs, size: SIZE, randomizeEnabled: randomizeEnabled, colorMap: newColorMap });
+        channel.publish('newgame', { lastPlaceWins: lastPlaceWins, aiDiffs: aiDiffsNG, slotMap: slotMap, numPlayers: totalPlayers, numAIs: olAIs, size: SIZE, randomizeEnabled: randomizeEnabled, colorMap: newColorMap });
       });
     }
   } else {
@@ -3115,7 +3179,7 @@ function showOLPanel(id) {
   if (id === 'ol-create') {
     buildOLCreateBtns();
     // Keep the toggle pills' visuals honest with their underlying checkboxes
-    ['ol-randomize-order', 'ol-tournament-mode'].forEach(function(cbId) {
+    ['ol-randomize-order', 'ol-tournament-mode', 'ol-lastplace-mode'].forEach(function(cbId) {
       var cb = $(cbId), tog = $(cbId.replace('-order', '-toggle').replace('-mode', '-toggle'));
       if (cb && tog) tog.className = 'opt-toggle' + (cb.checked ? ' on' : '');
     });
@@ -3519,7 +3583,7 @@ function olConfirmColours() {
 
   var aiColsHost = []; for (var q = NUM_HUMANS; q < NUM_PLAYERS; q++) aiColsHost.push(finalMap[q]);
   var aiDiffsOut = dealAIMix(aiColsHost);
-  channel.publish('start', { aiDiffs: aiDiffsOut, size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap, shuffledOrder: shuffledOrder, randomizeEnabled: !!(rcb && rcb.checked), tournamentEnabled: !!($('ol-tournament-mode') && $('ol-tournament-mode').checked) });
+  channel.publish('start', { aiDiffs: aiDiffsOut, size: SIZE, numPlayers: NUM_PLAYERS, numAIs: NUM_AIS, slotMap: olSlotMap, colorMap: finalMap, shuffledOrder: shuffledOrder, randomizeEnabled: !!(rcb && rcb.checked), tournamentEnabled: !!($('ol-tournament-mode') && $('ol-tournament-mode').checked), lastPlaceWins: !!($('ol-lastplace-mode') && $('ol-lastplace-mode').checked) });
 }
 
 function onOLStart(msg) {
@@ -3530,6 +3594,7 @@ function onOLStart(msg) {
   saveActiveRoomRecord();
   randomizeEnabled = !!d.randomizeEnabled;
   tournamentActive = !!d.tournamentEnabled;
+  lastPlaceWins = !!d.lastPlaceWins;
   tournamentScores = {};
   tournamentRound = 0;
   gameMode = 'online'; SIZE = d.size; NUM_PLAYERS = d.numPlayers; NUM_AIS = d.numAIs;
@@ -3695,6 +3760,7 @@ function olCheckWin() {
     }
   }
   renderSideLB(); renderPlayerBar();
+  lpwAnnounceFirst();
   var aliveCount = 0, winner = -1;
   for (var i = 0; i < NUM_PLAYERS; i++) if (alive[i]) { aliveCount++; winner = i; }
   if (aliveCount === 1) {
@@ -3709,18 +3775,22 @@ function olCheckWin() {
 }
 
 function olShowWin(p) {
-  animating = false; wins[p]++;
+  animating = false;
+  if (lastPlaceWins) { var _re = rankedEntries(); if (_re.length) p = _re[0].pi; }
+  wins[p]++;
   var wt = $('win-title'); if (wt) { wt.textContent = PN(p) + (PN(p).toLowerCase() === 'you' ? ' win!' : ' wins!'); wt.style.color = PC(p).dot; }
   var sub = document.querySelector('.win-sub');
   var lb = '<div style="text-align:left;font-size:12px;margin:0.5rem 0;">';
-  lb += '<div style="font-weight:700;margin-bottom:4px;">Leaderboard</div>';
-  for (var e = elimOrder.length - 1; e >= 0; e--) {
-    var pi = elimOrder[e];
-    var rank = NUM_PLAYERS - e;
+  lb += '<div style="font-weight:700;margin-bottom:4px;">Leaderboard' + (lastPlaceWins ? ' \u2014 Last Place Wins' : '') + '</div>';
+  var _ents = rankedEntries();
+    for (var _k = 0; _k < _ents.length; _k++) {
+    var e = _ents[_k].e;
+    var pi = _ents[_k].pi;
+    var rank = _ents[_k].rank;
     var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
     var info = elimInfo[pi];
     var detail = '';
-    if (info && info.isWinner) detail = 'Winner!'; else if (info && info.isForfeit) detail = 'Forfeit';
+    if (lastPlaceWins ? rank === 1 : (info && info.isWinner)) detail = 'Winner!'; else if (info && info.isWinner) detail = 'Last place'; else if (info && info.isForfeit) detail = 'Forfeit';
     else if (info) { detail = 'R' + info.round; if (info.killedBy >= 0 && info.killedBy !== pi) detail += ', by ' + PN(info.killedBy); }
     lb += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><span style="font-weight:700;min-width:20px;">' + medal + '</span><span style="width:8px;height:8px;border-radius:50%;background:'+PC(pi).dot+';display:inline-block;"></span> ' + PN(pi) + (detail ? '<span style="font-size:10px;opacity:0.5;margin-left:auto;">' + detail + '</span>' : '') + '</div>';
   }
@@ -5128,6 +5198,7 @@ olCreateRoom = function() {
           roundNum: roundNum, elimOrder: elimOrder, elimInfo: elimInfo, killCounts: killCounts,
           matchOrder: matchOrder, turnQueue: turnQueue.slice(), currentRoundOrder: currentRoundOrder,
           tournamentActive: tournamentActive, tournamentScores: tournamentScores, tournamentRound: tournamentRound,
+          lastPlaceWins: lastPlaceWins,
           slotMap: olSlotMapStored,
           gameStarted: true
         };
@@ -5199,6 +5270,7 @@ function onSyncReceived(msg) {
   if (d.turnQueue) turnQueue = d.turnQueue;
   if (d.currentRoundOrder) currentRoundOrder = d.currentRoundOrder;
   tournamentActive = !!d.tournamentActive;
+  lastPlaceWins = !!d.lastPlaceWins;
   tournamentScores = d.tournamentScores || {};
   tournamentRound = d.tournamentRound || 0;
   if (d.slotMap) olSlotMapStored = d.slotMap.slice();
@@ -5340,6 +5412,7 @@ onOLNewGame = function(msg) {
       }
     } else { defaultColorMap(); }
     if (d.aiDiffs) aiDiffCache = { map: d.aiDiffs };
+    if (d.lastPlaceWins !== undefined) lastPlaceWins = !!d.lastPlaceWins;
     for (var i = 0; i < NUM_PLAYERS; i++) {
       if (i < d.slotMap.length) { playerNames.push(d.slotMap[i].name); isAIPlayer.push(false); }
       else { isAIPlayer.push(true); playerNames.push(aiName(i)); }
@@ -5558,6 +5631,12 @@ function loadMainPublicRooms() {
         <span class="opt-label">Tournament mode</span>
         <span class="opt-switch"><span class="opt-knob"></span></span>
       </div>
+      <div class="opt-toggle" id="ol-lastplace-toggle" onclick="toggleOpt('ol-lastplace-mode','ol-lastplace-toggle')">
+        <span class="opt-icon">💀</span>
+        <span class="opt-label">Last Place Wins (first out wins)</span>
+        <span class="opt-switch"><span class="opt-knob"></span></span>
+      </div>
+      <input type="checkbox" id="ol-lastplace-mode" style="display:none;">
       <input type="checkbox" id="ol-randomize-order" style="display:none;">
       <input type="checkbox" id="ol-tournament-mode" style="display:none;">
     </div>
